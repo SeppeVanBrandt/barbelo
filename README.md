@@ -23,6 +23,7 @@ All commands start with the prefix key, `` ` `` (backtick).
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |
+| `` ` f ``       | Hint mode: copy text by typing its label |
 | `` ` ] ``       | Paste the last copied text              |
 | `` ` q ``       | Quit                                    |
 
@@ -37,6 +38,18 @@ Each pane is in one of three modes, shown at the left of the status bar.
 - **VISUAL**: select text to copy. Copied text goes to the system clipboard
   (`wl-copy`, `xclip` or `xsel`, falling back to OSC 52) and to barbelo's
   paste buffer.
+
+### Hint mode
+
+Like [tmux-fingers](https://github.com/Morantron/tmux-fingers): every
+interesting string in view gets a short label. Type a label to copy that
+string. `Esc` cancels, `Backspace` undoes a typed letter. Works from normal mode too, on whatever part
+of the history is in view.
+
+Recognised: URLs, paths (with `:line:col`), files in `git status` output,
+UUIDs, IPv4 addresses (with port), hex numbers, git SHAs and other hashes,
+and numbers of 4+ digits. Matches nearest the bottom get the shortest labels,
+and identical strings share one.
 
 ### Normal mode
 

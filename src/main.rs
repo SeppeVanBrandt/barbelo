@@ -1,6 +1,7 @@
 mod app;
 mod clipboard;
 mod copy;
+mod hints;
 mod keys;
 mod layout;
 mod pane;

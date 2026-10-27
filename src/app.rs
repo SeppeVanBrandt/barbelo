@@ -9,6 +9,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifier
 
 use crate::clipboard;
 use crate::copy::{Action, Mode};
+use crate::hints;
 use crate::keys;
 use crate::layout::{Direction, Rect, Split};
 use crate::pane::{PaneContext, PaneId};
@@ -150,6 +151,12 @@ impl App {
         window.panes.get(&window.active)?.copy.as_ref().map(|c| c.mode)
     }
 
+    /// Whether the active pane is showing hints.
+    pub fn hinting(&self) -> bool {
+        let window = self.active_window();
+        window.panes.get(&window.active).is_some_and(|p| p.hints.is_some())
+    }
+
     /// Cursor line (1-based) and line count of the active pane in copy mode.
     pub fn copy_position(&self) -> Option<(usize, usize)> {
         let window = self.active_window();
@@ -204,6 +211,14 @@ impl App {
             }
         } else if key.code == self.config.prefix.code && key.modifiers == self.config.prefix.modifiers {
             self.prefix_pending = true;
+        } else if let Some(hints) = &mut self.active_window_mut().active_pane().hints {
+            let action = hints.handle_key(key);
+            if !matches!(action, hints::Action::None) {
+                self.active_window_mut().active_pane().hints = None;
+            }
+            if let hints::Action::Copy(text) = action {
+                self.yank(text);
+            }
         } else if let Some(copy) = &mut self.active_window_mut().active_pane().copy {
             match copy.handle_key(key) {
                 Action::None => {}
@@ -280,6 +295,11 @@ impl App {
             }
             KeyCode::Char('&') => self.close_window(self.active),
             KeyCode::Char('[') | KeyCode::Esc => self.active_window_mut().active_pane().enter_copy_mode(),
+            KeyCode::Char('f') => {
+                if !self.active_window_mut().active_pane().enter_hint_mode() {
+                    self.message = Some("nothing to copy".into());
+                }
+            }
             KeyCode::Char(']') => {
                 if let Some(text) = self.paste_buffer.clone() {
                     self.paste(&text);

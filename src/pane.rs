@@ -8,7 +8,8 @@ use anyhow::{Context, Result};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use crate::app::AppEvent;
-use crate::copy::CopyMode;
+use crate::copy::{self, CopyMode};
+use crate::hints::HintMode;
 use crate::queries::{Responder, TerminalColors};
 
 pub type PaneId = usize;
@@ -28,6 +29,8 @@ pub struct Pane {
     pub parser: Arc<Mutex<vt100::Parser<Responder>>>,
     /// Set while the pane is in normal or visual mode.
     pub copy: Option<CopyMode>,
+    /// Set while hints are shown; takes precedence over `copy`.
+    pub hints: Option<HintMode>,
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
@@ -96,6 +99,7 @@ impl Pane {
         Ok(Self {
             parser,
             copy: None,
+            hints: None,
             master: pair.master,
             writer,
             child,
@@ -108,6 +112,20 @@ impl Pane {
             let mut parser = self.parser.lock().unwrap();
             self.copy = Some(CopyMode::new(parser.screen_mut()));
         }
+    }
+
+    /// Labels the strings in view with hints. Returns `false` if there are none.
+    pub fn enter_hint_mode(&mut self) -> bool {
+        let lines = match &self.copy {
+            Some(copy) => copy.visible_lines(),
+            None => copy::visible_lines(self.parser.lock().unwrap().screen()),
+        };
+        let hints = HintMode::new(lines);
+        if hints.matches.is_empty() {
+            return false;
+        }
+        self.hints = Some(hints);
+        true
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
@@ -124,6 +142,7 @@ impl Pane {
         self.size = (rows, cols);
         // The snapshot no longer matches the pane, so drop back to insert mode.
         self.copy = None;
+        self.hints = None;
         let _ = self.master.resize(pty_size(rows, cols));
         self.parser.lock().unwrap().set_size(nz(rows), nz(cols));
     }

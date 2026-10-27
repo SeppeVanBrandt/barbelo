@@ -8,7 +8,8 @@ use crossterm::style::{
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 
 use crate::app::App;
-use crate::copy::{CopyMode, Mode};
+use crate::copy::{CopyMode, Line, Mode};
+use crate::hints::{HintMode, Overlay};
 use crate::layout::{Border, Rect};
 
 const ACTIVE_BORDER: Color = Color::Green;
@@ -17,6 +18,34 @@ const STATUS_FG: Color = Color::Black;
 const STATUS_BG: Color = Color::Green;
 const NORMAL_BG: Color = Color::Blue;
 const VISUAL_BG: Color = Color::Magenta;
+const HINTS_BG: Color = Color::Yellow;
+/// Hint labels: black on bright yellow.
+const LABEL_STYLE: Style = Style {
+    fg: vt100::Color::Idx(0),
+    bg: vt100::Color::Idx(11),
+    bold: true,
+    italic: false,
+    underline: false,
+    inverse: false,
+};
+/// Matched text: bright yellow.
+const MATCH_STYLE: Style = Style {
+    fg: vt100::Color::Idx(11),
+    bg: vt100::Color::Default,
+    bold: true,
+    italic: false,
+    underline: false,
+    inverse: false,
+};
+/// Everything else fades into the background.
+const DIM_STYLE: Style = Style {
+    fg: vt100::Color::Idx(8),
+    bg: vt100::Color::Default,
+    bold: false,
+    italic: false,
+    underline: false,
+    inverse: false,
+};
 
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     queue!(out, BeginSynchronizedUpdate, Hide)?;
@@ -31,6 +60,10 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
             continue;
         };
         let active = *id == window.active;
+        if let Some(hints) = &pane.hints {
+            draw_hints(out, hints, *rect)?;
+            continue;
+        }
         if let Some(copy) = &pane.copy {
             draw_copy(out, copy, *rect)?;
             let row = copy.cursor.line.checked_sub(copy.view_top());
@@ -159,6 +192,30 @@ fn draw_copy(out: &mut impl Write, copy: &CopyMode, rect: Rect) -> io::Result<()
     })
 }
 
+fn draw_hints(out: &mut impl Write, hints: &HintMode, rect: Rect) -> io::Result<()> {
+    draw_cells(out, rect, |row, col| {
+        let cell = hints.lines.get(row as usize).and_then(|l: &Line| l.cells.get(col as usize))?;
+        let overlay = hints.overlay(row, col);
+        // A label is one column wide, so it can split a wide character; blank
+        // out the half that is left over.
+        let after_label =
+            col > 0 && matches!(hints.overlay(row, col - 1), Overlay::Label(_)) && cell.continuation;
+        let (text, style) = match overlay {
+            Overlay::Label(c) => (c, LABEL_STYLE),
+            _ if after_label => (" ", DIM_STYLE),
+            Overlay::Match => (cell.text.as_str(), MATCH_STYLE),
+            Overlay::Plain => (cell.text.as_str(), DIM_STYLE),
+        };
+        let replaced = matches!(overlay, Overlay::Label(_)) || after_label;
+        Some(CellView {
+            text,
+            style,
+            wide: cell.wide && !replaced,
+            continuation: cell.continuation && !replaced,
+        })
+    })
+}
+
 fn draw_cells<'a>(
     out: &mut impl Write,
     rect: Rect,
@@ -280,6 +337,10 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
     }
 
     let mode = match app.mode() {
+        _ if app.hinting() => Segment {
+            bg: HINTS_BG,
+            ..Segment::new(" HINTS  ", true)
+        },
         None => Segment::new(" INSERT ", true),
         Some(Mode::Normal) => Segment {
             bg: NORMAL_BG,

@@ -34,6 +34,7 @@ pub struct Cell {
     pub continuation: bool,
 }
 
+#[derive(Clone)]
 pub struct Line {
     pub cells: Vec<Cell>,
     pub wrapped: bool,
@@ -101,6 +102,13 @@ impl CopyMode {
 
     pub fn line(&self, index: usize) -> Option<&Line> {
         self.lines.get(index)
+    }
+
+    /// The rows currently in view.
+    pub fn visible_lines(&self) -> Vec<Line> {
+        let top = self.view_top();
+        let end = (top + self.rows as usize).min(self.lines.len());
+        self.lines[top..end].to_vec()
     }
 
     pub fn len(&self) -> usize {
@@ -440,6 +448,12 @@ impl CopyMode {
             .position(|c| !c.text.trim().is_empty())
             .map_or(0, |i| i as u16)
     }
+}
+
+/// The rows currently on `screen`.
+pub fn visible_lines(screen: &vt100::Screen) -> Vec<Line> {
+    let (rows, cols) = screen.size();
+    (0..rows.get()).map(|row| read_line(screen, row, cols.get())).collect()
 }
 
 fn read_line(screen: &vt100::Screen, row: u16, cols: u16) -> Line {
