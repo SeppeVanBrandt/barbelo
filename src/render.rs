@@ -1,6 +1,6 @@
 use std::io::{self, Write};
 
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
 use crossterm::queue;
 use crossterm::style::{
     Attribute, Color, Print, SetAttribute, SetBackgroundColor, SetForegroundColor,
@@ -8,12 +8,15 @@ use crossterm::style::{
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 
 use crate::app::App;
+use crate::copy::{CopyMode, Mode};
 use crate::layout::{Border, Rect};
 
 const ACTIVE_BORDER: Color = Color::Green;
 const INACTIVE_BORDER: Color = Color::DarkGrey;
 const STATUS_FG: Color = Color::Black;
 const STATUS_BG: Color = Color::Green;
+const NORMAL_BG: Color = Color::Blue;
+const VISUAL_BG: Color = Color::Magenta;
 
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     queue!(out, BeginSynchronizedUpdate, Hide)?;
@@ -27,10 +30,22 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
         let Some(pane) = window.panes.get(id) else {
             continue;
         };
+        let active = *id == window.active;
+        if let Some(copy) = &pane.copy {
+            draw_copy(out, copy, *rect)?;
+            let row = copy.cursor.line.checked_sub(copy.view_top());
+            if let Some(row) = row.filter(|r| *r < rect.h as usize)
+                && active
+                && copy.cursor.col < rect.w
+            {
+                cursor = Some((rect.x + copy.cursor.col, rect.y + row as u16));
+            }
+            continue;
+        }
         let parser = pane.parser.lock().unwrap();
         let screen = parser.screen();
         draw_screen(out, screen, *rect)?;
-        if *id == window.active && !screen.hide_cursor() {
+        if active && !screen.hide_cursor() {
             let (row, col) = screen.cursor_position();
             if row < rect.h && col < rect.w {
                 cursor = Some((rect.x + col, rect.y + row));
@@ -42,6 +57,11 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     draw_borders(out, &layout.borders, area, active_rect)?;
     draw_status(out, app)?;
 
+    let shape = match app.mode() {
+        None => SetCursorStyle::DefaultUserShape,
+        Some(_) => SetCursorStyle::SteadyBlock,
+    };
+    queue!(out, shape)?;
     if let Some((x, y)) = cursor {
         queue!(out, MoveTo(x, y), Show)?;
     }
@@ -49,8 +69,8 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     out.flush()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct Style {
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Style {
     fg: vt100::Color,
     bg: vt100::Color,
     bold: bool,
@@ -60,7 +80,7 @@ struct Style {
 }
 
 impl Style {
-    fn of(cell: &vt100::Cell) -> Self {
+    pub fn of(cell: &vt100::Cell) -> Self {
         Self {
             fg: cell.fgcolor(),
             bg: cell.bgcolor(),
@@ -102,14 +122,55 @@ fn color(c: vt100::Color) -> Color {
     }
 }
 
+/// What to draw in one terminal cell.
+struct CellView<'a> {
+    text: &'a str,
+    style: Style,
+    wide: bool,
+    continuation: bool,
+}
+
 fn draw_screen(out: &mut impl Write, screen: &vt100::Screen, rect: Rect) -> io::Result<()> {
+    draw_cells(out, rect, |row, col| {
+        screen.cell(row, col).map(|cell| CellView {
+            text: cell.contents(),
+            style: Style::of(cell),
+            wide: cell.is_wide(),
+            continuation: cell.is_wide_continuation(),
+        })
+    })
+}
+
+fn draw_copy(out: &mut impl Write, copy: &CopyMode, rect: Rect) -> io::Result<()> {
+    let top = copy.view_top();
+    draw_cells(out, rect, |row, col| {
+        let line = top + row as usize;
+        let cell = copy.line(line)?.cells.get(col as usize)?;
+        let mut style = cell.style;
+        if copy.is_selected(line, col) {
+            style.inverse = !style.inverse;
+        }
+        Some(CellView {
+            text: &cell.text,
+            style,
+            wide: cell.wide,
+            continuation: cell.continuation,
+        })
+    })
+}
+
+fn draw_cells<'a>(
+    out: &mut impl Write,
+    rect: Rect,
+    cell_at: impl Fn(u16, u16) -> Option<CellView<'a>>,
+) -> io::Result<()> {
     queue!(out, SetAttribute(Attribute::Reset))?;
     let mut current: Option<Style> = None;
     for row in 0..rect.h {
         queue!(out, MoveTo(rect.x, rect.y + row))?;
         let mut col = 0;
         while col < rect.w {
-            let Some(cell) = screen.cell(row, col) else {
+            let Some(cell) = cell_at(row, col) else {
                 if current.take().is_some() {
                     queue!(out, SetAttribute(Attribute::Reset))?;
                 }
@@ -117,23 +178,21 @@ fn draw_screen(out: &mut impl Write, screen: &vt100::Screen, rect: Rect) -> io::
                 col += 1;
                 continue;
             };
-            if cell.is_wide_continuation() {
+            if cell.continuation {
                 col += 1;
                 continue;
             }
-            let style = Style::of(cell);
-            if current != Some(style) {
-                style.apply(out)?;
-                current = Some(style);
+            if current != Some(cell.style) {
+                cell.style.apply(out)?;
+                current = Some(cell.style);
             }
             // A wide character in the last column would spill over the border.
-            let contents = cell.contents();
-            if contents.is_empty() || (cell.is_wide() && col + 1 >= rect.w) {
+            if cell.text.is_empty() || (cell.wide && col + 1 >= rect.w) {
                 queue!(out, Print(' '))?;
             } else {
-                queue!(out, Print(contents))?;
+                queue!(out, Print(cell.text))?;
             }
-            col += if cell.is_wide() { 2 } else { 1 };
+            col += if cell.wide { 2 } else { 1 };
         }
     }
     queue!(out, SetAttribute(Attribute::Reset))
@@ -196,42 +255,75 @@ fn draw_borders(
     queue!(out, SetAttribute(Attribute::Reset))
 }
 
+struct Segment {
+    text: String,
+    bold: bool,
+    fg: Color,
+    bg: Color,
+}
+
+impl Segment {
+    fn new(text: impl Into<String>, bold: bool) -> Self {
+        Self {
+            text: text.into(),
+            bold,
+            fg: STATUS_FG,
+            bg: STATUS_BG,
+        }
+    }
+}
+
 fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
     let (cols, rows) = app.size;
     if rows == 0 {
         return Ok(());
     }
-    // Segments of (text, bold), laid out left to right.
-    let mut segments = vec![("[barbelo] ".to_string(), false)];
+
+    let mode = match app.mode() {
+        None => Segment::new(" INSERT ", true),
+        Some(Mode::Normal) => Segment {
+            bg: NORMAL_BG,
+            fg: Color::White,
+            ..Segment::new(" NORMAL ", true)
+        },
+        Some(Mode::Visual | Mode::VisualLine) => Segment {
+            bg: VISUAL_BG,
+            fg: Color::White,
+            ..Segment::new(if app.mode() == Some(Mode::Visual) { " VISUAL " } else { " V-LINE " }, true)
+        },
+    };
+    let mut segments = vec![mode, Segment::new(" [barbelo] ", false)];
     for (i, window) in app.windows.iter().enumerate() {
         let active = i == app.active;
         let flag = if active { "*" } else { " " };
-        segments.push((format!("{i}:{}{flag} ", window.name()), active));
+        segments.push(Segment::new(format!("{i}:{}{flag} ", window.name()), active));
     }
-    let right = match (&app.message, app.prefix_pending) {
-        (Some(msg), _) => format!(" {msg} "),
-        (None, true) => " PREFIX ".to_string(),
-        (None, false) => String::new(),
+
+    let right = match (&app.message, app.prefix_pending, app.copy_position()) {
+        (Some(msg), _, _) => format!(" {msg} "),
+        (None, true, _) => " PREFIX ".to_string(),
+        (None, false, Some((line, total))) => format!(" {line}/{total} "),
+        (None, false, None) => String::new(),
     };
     let width = cols as usize;
-    let left_len: usize = segments.iter().map(|(s, _)| s.chars().count()).sum();
+    let left_len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
     let gap = width.saturating_sub(left_len + right.chars().count());
-    segments.push((" ".repeat(gap), false));
-    segments.push((right, true));
+    segments.push(Segment::new(" ".repeat(gap), false));
+    segments.push(Segment::new(right, true));
 
-    queue!(
-        out,
-        MoveTo(0, rows - 1),
-        SetAttribute(Attribute::Reset),
-        SetForegroundColor(STATUS_FG),
-        SetBackgroundColor(STATUS_BG),
-    )?;
+    queue!(out, MoveTo(0, rows - 1), SetAttribute(Attribute::Reset))?;
     let mut remaining = width;
-    for (text, bold) in segments {
-        let text: String = text.chars().take(remaining).collect();
+    for segment in segments {
+        let text: String = segment.text.chars().take(remaining).collect();
         remaining -= text.chars().count();
-        let attr = if bold { Attribute::Bold } else { Attribute::NormalIntensity };
-        queue!(out, SetAttribute(attr), Print(text))?;
+        let attr = if segment.bold { Attribute::Bold } else { Attribute::NormalIntensity };
+        queue!(
+            out,
+            SetForegroundColor(segment.fg),
+            SetBackgroundColor(segment.bg),
+            SetAttribute(attr),
+            Print(text)
+        )?;
     }
     queue!(out, SetAttribute(Attribute::Reset))
 }

@@ -1,4 +1,6 @@
 mod app;
+mod clipboard;
+mod copy;
 mod keys;
 mod layout;
 mod pane;
@@ -9,6 +11,7 @@ use std::io;
 
 use anyhow::Result;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
+use crossterm::cursor::SetCursorStyle;
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -37,6 +40,11 @@ fn main() -> Result<()> {
 }
 
 fn restore_terminal() {
-    let _ = execute!(io::stdout(), DisableBracketedPaste, LeaveAlternateScreen);
+    let _ = execute!(
+        io::stdout(),
+        SetCursorStyle::DefaultUserShape,
+        DisableBracketedPaste,
+        LeaveAlternateScreen
+    );
     let _ = disable_raw_mode();
 }

@@ -8,6 +8,7 @@ use anyhow::{Context, Result};
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use crate::app::AppEvent;
+use crate::copy::CopyMode;
 
 pub type PaneId = usize;
 
@@ -17,6 +18,8 @@ const SCROLLBACK: usize = 1000;
 /// screen state built from its output.
 pub struct Pane {
     pub parser: Arc<Mutex<vt100::Parser>>,
+    /// Set while the pane is in normal or visual mode.
+    pub copy: Option<CopyMode>,
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     child: Box<dyn Child + Send + Sync>,
@@ -70,11 +73,19 @@ impl Pane {
 
         Ok(Self {
             parser,
+            copy: None,
             master: pair.master,
             writer,
             child,
             size: (rows, cols),
         })
+    }
+
+    pub fn enter_copy_mode(&mut self) {
+        if self.copy.is_none() {
+            let mut parser = self.parser.lock().unwrap();
+            self.copy = Some(CopyMode::new(parser.screen_mut()));
+        }
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
@@ -88,6 +99,8 @@ impl Pane {
             return;
         }
         self.size = (rows, cols);
+        // The snapshot no longer matches the pane, so drop back to insert mode.
+        self.copy = None;
         let _ = self.master.resize(pty_size(rows, cols));
         self.parser.lock().unwrap().set_size(nz(rows), nz(cols));
     }

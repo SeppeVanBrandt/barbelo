@@ -1,15 +1,21 @@
-use std::io::{self, BufWriter};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::io::{self, BufWriter, Write};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
+use crate::clipboard;
+use crate::copy::{Action, Mode};
 use crate::keys;
 use crate::layout::{Direction, Rect, Split};
 use crate::pane::PaneId;
 use crate::render;
 use crate::window::Window;
+
+/// Frame interval while a scroll animation is running.
+const FRAME: Duration = Duration::from_millis(8);
 
 pub enum AppEvent {
     Input(Event),
@@ -38,6 +44,10 @@ pub struct App {
     pub size: (u16, u16),
     pub prefix_pending: bool,
     pub message: Option<String>,
+    /// Text from the last yank, pasted with prefix + `]`.
+    paste_buffer: Option<String>,
+    /// Escape sequences for the outer terminal, written before the next frame.
+    pending_output: Vec<u8>,
     next_pane_id: PaneId,
     events: Sender<AppEvent>,
     quit: bool,
@@ -53,6 +63,8 @@ impl App {
             size: crossterm::terminal::size()?,
             prefix_pending: false,
             message: None,
+            paste_buffer: None,
+            pending_output: Vec::new(),
             next_pane_id: 0,
             events: tx,
             quit: false,
@@ -73,18 +85,71 @@ impl App {
 
         let mut out = BufWriter::with_capacity(1 << 16, io::stdout());
         render::draw(&self, &mut out)?;
-        while let Ok(ev) = rx.recv() {
-            self.handle(ev);
-            // Coalesce bursts of output into a single redraw.
-            while let Ok(ev) = rx.try_recv() {
+        let mut last_frame = Instant::now();
+        loop {
+            // While scrolling is animating, wake up every frame even without events.
+            let ev = if self.animating() {
+                match rx.recv_timeout(FRAME) {
+                    Ok(ev) => Some(ev),
+                    Err(RecvTimeoutError::Timeout) => None,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            } else {
+                match rx.recv() {
+                    Ok(ev) => Some(ev),
+                    Err(_) => break,
+                }
+            };
+            if let Some(ev) = ev {
                 self.handle(ev);
+                // Coalesce bursts of output into a single redraw.
+                while let Ok(ev) = rx.try_recv() {
+                    self.handle(ev);
+                }
             }
             if self.quit {
                 break;
             }
+
+            let now = Instant::now();
+            // Cap the step so an animation starting after idle time doesn't jump.
+            self.tick((now - last_frame).min(FRAME * 2));
+            last_frame = now;
+
+            if !self.pending_output.is_empty() {
+                out.write_all(&std::mem::take(&mut self.pending_output))?;
+            }
             render::draw(&self, &mut out)?;
         }
         Ok(())
+    }
+
+    fn animating(&self) -> bool {
+        self.windows
+            .iter()
+            .flat_map(|w| w.panes.values())
+            .any(|p| p.copy.as_ref().is_some_and(|c| c.animating()))
+    }
+
+    fn tick(&mut self, dt: Duration) {
+        for pane in self.windows.iter_mut().flat_map(|w| w.panes.values_mut()) {
+            if let Some(copy) = &mut pane.copy {
+                copy.tick(dt);
+            }
+        }
+    }
+
+    /// Mode of the active pane, or `None` in insert mode.
+    pub fn mode(&self) -> Option<Mode> {
+        let window = self.active_window();
+        window.panes.get(&window.active)?.copy.as_ref().map(|c| c.mode)
+    }
+
+    /// Cursor line (1-based) and line count of the active pane in copy mode.
+    pub fn copy_position(&self) -> Option<(usize, usize)> {
+        let window = self.active_window();
+        let copy = window.panes.get(&window.active)?.copy.as_ref()?;
+        Some((copy.cursor.line + 1, copy.len()))
     }
 
     pub fn pane_area(&self) -> Rect {
@@ -112,15 +177,7 @@ impl App {
                 self.handle_key(key)
             }
             AppEvent::Input(Event::Paste(text)) => {
-                let pane = self.active_window_mut().active_pane();
-                let bracketed = pane.parser.lock().unwrap().screen().bracketed_paste();
-                if bracketed {
-                    pane.write(b"\x1b[200~");
-                    pane.write(text.as_bytes());
-                    pane.write(b"\x1b[201~");
-                } else {
-                    pane.write(text.as_bytes());
-                }
+                self.paste(&text);
             }
             AppEvent::Input(Event::Resize(cols, rows)) => {
                 self.size = (cols, rows);
@@ -142,8 +199,41 @@ impl App {
             }
         } else if key.code == self.config.prefix.code && key.modifiers == self.config.prefix.modifiers {
             self.prefix_pending = true;
+        } else if let Some(copy) = &mut self.active_window_mut().active_pane().copy {
+            match copy.handle_key(key) {
+                Action::None => {}
+                Action::Exit => self.active_window_mut().active_pane().copy = None,
+                Action::Yank(text) => self.yank(text),
+            }
         } else {
             self.send_key(key);
+        }
+    }
+
+    fn yank(&mut self, text: String) {
+        let lines = text.lines().count().max(1);
+        if !clipboard::copy(&text) {
+            self.pending_output.extend_from_slice(clipboard::osc52(&text).as_bytes());
+        }
+        self.message = Some(match lines {
+            1 => format!("copied {} chars", text.chars().count()),
+            n => format!("copied {n} lines"),
+        });
+        self.paste_buffer = Some(text);
+    }
+
+    fn paste(&mut self, text: &str) {
+        let pane = self.active_window_mut().active_pane();
+        if pane.copy.is_some() {
+            return;
+        }
+        let bracketed = pane.parser.lock().unwrap().screen().bracketed_paste();
+        if bracketed {
+            pane.write(b"\x1b[200~");
+            pane.write(text.as_bytes());
+            pane.write(b"\x1b[201~");
+        } else {
+            pane.write(text.as_bytes());
         }
     }
 
@@ -184,6 +274,12 @@ impl App {
                 self.close_pane(id);
             }
             KeyCode::Char('&') => self.close_window(self.active),
+            KeyCode::Char('[') | KeyCode::Esc => self.active_window_mut().active_pane().enter_copy_mode(),
+            KeyCode::Char(']') => {
+                if let Some(text) = self.paste_buffer.clone() {
+                    self.paste(&text);
+                }
+            }
             KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
