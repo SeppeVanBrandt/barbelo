@@ -216,8 +216,13 @@ impl App {
             if !matches!(action, hints::Action::None) {
                 self.active_window_mut().active_pane().hints = None;
             }
-            if let hints::Action::Copy(text) = action {
-                self.yank(text);
+            match action {
+                hints::Action::None | hints::Action::Exit => {}
+                hints::Action::Copy(text) => self.yank(text),
+                hints::Action::CopyAndPaste(text) => {
+                    self.yank(text.clone());
+                    self.paste(&text);
+                }
             }
         } else if let Some(copy) = &mut self.active_window_mut().active_pane().copy {
             match copy.handle_key(key) {
@@ -276,8 +281,9 @@ impl App {
             KeyCode::Char('p') => {
                 self.active = (self.active + self.windows.len() - 1) % self.windows.len()
             }
+            // Windows are numbered from 1; 0 selects the tenth.
             KeyCode::Char(c @ '0'..='9') => {
-                let i = c as usize - '0' as usize;
+                let i = (c as usize - '0' as usize + 9) % 10;
                 if i < self.windows.len() {
                     self.active = i;
                 }
@@ -289,6 +295,7 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.active_window_mut().focus(Direction::Up, area),
             KeyCode::Down | KeyCode::Char('j') => self.active_window_mut().focus(Direction::Down, area),
             KeyCode::Char('o') => self.active_window_mut().focus_next(area),
+            KeyCode::Char(';' | ':') => self.active_window_mut().focus_last(),
             KeyCode::Char('x') => {
                 let id = self.active_window().active;
                 self.close_pane(id);

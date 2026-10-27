@@ -15,11 +15,12 @@ All commands start with the prefix key, `` ` `` (backtick).
 | `` ` ` ``       | Send a literal backtick                 |
 | `` ` c ``       | New window                              |
 | `` ` n `` / `` ` p `` | Next / previous window            |
-| `` ` 0 ``–`` ` 9 `` | Select window by number             |
+| `` ` 1 ``–`` ` 9 ``, `` ` 0 `` | Select window 1–9, or 10   |
 | `` ` % `` / `` ` \| `` | Split side by side               |
 | `` ` " `` / `` ` - `` | Split top and bottom              |
 | `` ` ←↑↓→ `` / `` ` hjkl `` | Move focus between panes    |
 | `` ` o ``       | Focus next pane                         |
+| `` ` ; `` / `` ` : `` | Jump back to the last active pane |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |

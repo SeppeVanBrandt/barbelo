@@ -9,6 +9,8 @@ pub struct Window {
     root: Node,
     pub panes: HashMap<PaneId, Pane>,
     pub active: PaneId,
+    /// Previously active pane, for jumping back.
+    last: Option<PaneId>,
 }
 
 impl Window {
@@ -18,6 +20,7 @@ impl Window {
             root: Node::Leaf(id),
             panes: HashMap::from([(id, pane)]),
             active: id,
+            last: None,
         })
     }
 
@@ -35,7 +38,7 @@ impl Window {
         match Pane::spawn(id, rect.h, rect.w, ctx) {
             Ok(pane) => {
                 self.panes.insert(id, pane);
-                self.active = id;
+                self.set_active(id);
                 self.resize(area);
                 Ok(())
             }
@@ -53,8 +56,11 @@ impl Window {
         if empty {
             return true;
         }
+        if self.last == Some(id) {
+            self.last = None;
+        }
         if self.active == id {
-            self.active = self.root.first_leaf();
+            self.active = self.last.take().unwrap_or_else(|| self.root.first_leaf());
         }
         self.resize(area);
         false
@@ -79,14 +85,27 @@ impl Window {
             Direction::Up | Direction::Down => rect.x + col,
         };
         if let Some(id) = neighbor(&layout, self.active, dir, hint) {
-            self.active = id;
+            self.set_active(id);
         }
     }
 
     pub fn focus_next(&mut self, area: Rect) {
         let ids: Vec<PaneId> = self.layout(area).panes.iter().map(|(id, _)| *id).collect();
         if let Some(pos) = ids.iter().position(|id| *id == self.active) {
-            self.active = ids[(pos + 1) % ids.len()];
+            self.set_active(ids[(pos + 1) % ids.len()]);
+        }
+    }
+
+    pub fn focus_last(&mut self) {
+        if let Some(id) = self.last.filter(|id| self.panes.contains_key(id)) {
+            self.set_active(id);
+        }
+    }
+
+    fn set_active(&mut self, id: PaneId) {
+        if id != self.active {
+            self.last = Some(self.active);
+            self.active = id;
         }
     }
 

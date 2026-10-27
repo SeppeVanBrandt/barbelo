@@ -357,7 +357,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
     for (i, window) in app.windows.iter().enumerate() {
         let active = i == app.active;
         let flag = if active { "*" } else { " " };
-        segments.push(Segment::new(format!("{i}:{}{flag} ", window.name()), active));
+        segments.push(Segment::new(format!("{}:{}{flag} ", i + 1, window.name()), active));
     }
 
     let right = match (&app.message, app.prefix_pending, app.copy_position()) {

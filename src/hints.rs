@@ -49,6 +49,7 @@ pub enum Action {
     None,
     Exit,
     Copy(String),
+    CopyAndPaste(String),
 }
 
 /// What a screen cell shows while hints are up.
@@ -114,7 +115,12 @@ impl HintMode {
             KeyCode::Char(c) if c.is_ascii_alphabetic() => {
                 self.typed.push(c.to_ascii_lowercase());
                 if let Some(m) = self.matches.iter().find(|m| m.hint == self.typed) {
-                    return Action::Copy(m.text.clone());
+                    let text = m.text.clone();
+                    return if c.is_ascii_uppercase() {
+                        Action::CopyAndPaste(text)
+                    } else {
+                        Action::Copy(text)
+                    };
                 }
                 if !self.matches.iter().any(|m| m.hint.starts_with(&self.typed)) {
                     self.typed.pop();
@@ -317,7 +323,7 @@ mod tests {
     fn typing_a_hint_copies() {
         let mut mode = HintMode::new(lines(&["/tmp/a /tmp/b"], 80));
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        assert!(matches!(mode.handle_key(key('S')), Action::CopyAndPaste(t) if t == "/tmp/a"));
         assert!(matches!(mode.handle_key(key('z')), Action::None));
-        assert!(matches!(mode.handle_key(key('s')), Action::Copy(t) if t == "/tmp/a"));
     }
 }
