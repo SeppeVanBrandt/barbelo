@@ -1,0 +1,234 @@
+use std::io::{self, BufWriter};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
+
+use anyhow::Result;
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+use crate::keys;
+use crate::layout::{Direction, Rect, Split};
+use crate::pane::PaneId;
+use crate::render;
+use crate::window::Window;
+
+pub enum AppEvent {
+    Input(Event),
+    PaneOutput,
+    PaneExited(PaneId),
+}
+
+pub struct Config {
+    /// Key that starts a command sequence.
+    pub prefix: KeyEvent,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            prefix: KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE),
+        }
+    }
+}
+
+pub struct App {
+    pub config: Config,
+    pub windows: Vec<Window>,
+    pub active: usize,
+    /// Terminal size as (columns, rows).
+    pub size: (u16, u16),
+    pub prefix_pending: bool,
+    pub message: Option<String>,
+    next_pane_id: PaneId,
+    events: Sender<AppEvent>,
+    quit: bool,
+}
+
+impl App {
+    pub fn new(config: Config) -> Result<(Self, Receiver<AppEvent>)> {
+        let (tx, rx) = mpsc::channel();
+        let mut app = Self {
+            config,
+            windows: Vec::new(),
+            active: 0,
+            size: crossterm::terminal::size()?,
+            prefix_pending: false,
+            message: None,
+            next_pane_id: 0,
+            events: tx,
+            quit: false,
+        };
+        app.new_window()?;
+        Ok((app, rx))
+    }
+
+    pub fn run(mut self, rx: Receiver<AppEvent>) -> Result<()> {
+        let input = self.events.clone();
+        thread::spawn(move || {
+            while let Ok(ev) = event::read() {
+                if input.send(AppEvent::Input(ev)).is_err() {
+                    break;
+                }
+            }
+        });
+
+        let mut out = BufWriter::with_capacity(1 << 16, io::stdout());
+        render::draw(&self, &mut out)?;
+        while let Ok(ev) = rx.recv() {
+            self.handle(ev);
+            // Coalesce bursts of output into a single redraw.
+            while let Ok(ev) = rx.try_recv() {
+                self.handle(ev);
+            }
+            if self.quit {
+                break;
+            }
+            render::draw(&self, &mut out)?;
+        }
+        Ok(())
+    }
+
+    pub fn pane_area(&self) -> Rect {
+        Rect {
+            x: 0,
+            y: 0,
+            w: self.size.0,
+            h: self.size.1.saturating_sub(1),
+        }
+    }
+
+    pub fn active_window(&self) -> &Window {
+        &self.windows[self.active]
+    }
+
+    fn active_window_mut(&mut self) -> &mut Window {
+        &mut self.windows[self.active]
+    }
+
+    fn handle(&mut self, ev: AppEvent) {
+        match ev {
+            AppEvent::PaneOutput => {}
+            AppEvent::PaneExited(id) => self.close_pane(id),
+            AppEvent::Input(Event::Key(key)) if key.kind != KeyEventKind::Release => {
+                self.handle_key(key)
+            }
+            AppEvent::Input(Event::Paste(text)) => {
+                let pane = self.active_window_mut().active_pane();
+                let bracketed = pane.parser.lock().unwrap().screen().bracketed_paste();
+                if bracketed {
+                    pane.write(b"\x1b[200~");
+                    pane.write(text.as_bytes());
+                    pane.write(b"\x1b[201~");
+                } else {
+                    pane.write(text.as_bytes());
+                }
+            }
+            AppEvent::Input(Event::Resize(cols, rows)) => {
+                self.size = (cols, rows);
+                let area = self.pane_area();
+                for window in &mut self.windows {
+                    window.resize(area);
+                }
+            }
+            AppEvent::Input(_) => {}
+        }
+    }
+
+    fn handle_key(&mut self, key: KeyEvent) {
+        self.message = None;
+        if self.prefix_pending {
+            self.prefix_pending = false;
+            if let Err(e) = self.command(key) {
+                self.message = Some(e.to_string());
+            }
+        } else if key.code == self.config.prefix.code && key.modifiers == self.config.prefix.modifiers {
+            self.prefix_pending = true;
+        } else {
+            self.send_key(key);
+        }
+    }
+
+    fn send_key(&mut self, key: KeyEvent) {
+        let pane = self.active_window_mut().active_pane();
+        let app_cursor = pane.parser.lock().unwrap().screen().application_cursor();
+        let bytes = keys::to_bytes(key, app_cursor);
+        if !bytes.is_empty() {
+            pane.write(&bytes);
+        }
+    }
+
+    /// Runs the command bound to `key` after the prefix.
+    fn command(&mut self, key: KeyEvent) -> Result<()> {
+        let area = self.pane_area();
+        match key.code {
+            _ if key.code == self.config.prefix.code => self.send_key(self.config.prefix),
+            KeyCode::Char('c') => self.new_window()?,
+            KeyCode::Char('n') => self.active = (self.active + 1) % self.windows.len(),
+            KeyCode::Char('p') => {
+                self.active = (self.active + self.windows.len() - 1) % self.windows.len()
+            }
+            KeyCode::Char(c @ '0'..='9') => {
+                let i = c as usize - '0' as usize;
+                if i < self.windows.len() {
+                    self.active = i;
+                }
+            }
+            KeyCode::Char('%' | '|') => self.split(Split::Horizontal)?,
+            KeyCode::Char('"' | '-') => self.split(Split::Vertical)?,
+            KeyCode::Left | KeyCode::Char('h') => self.active_window_mut().focus(Direction::Left, area),
+            KeyCode::Right | KeyCode::Char('l') => self.active_window_mut().focus(Direction::Right, area),
+            KeyCode::Up | KeyCode::Char('k') => self.active_window_mut().focus(Direction::Up, area),
+            KeyCode::Down | KeyCode::Char('j') => self.active_window_mut().focus(Direction::Down, area),
+            KeyCode::Char('o') => self.active_window_mut().focus_next(area),
+            KeyCode::Char('x') => {
+                let id = self.active_window().active;
+                self.close_pane(id);
+            }
+            KeyCode::Char('&') => self.close_window(self.active),
+            KeyCode::Char('q') => self.quit = true,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn alloc_pane_id(&mut self) -> PaneId {
+        let id = self.next_pane_id;
+        self.next_pane_id += 1;
+        id
+    }
+
+    fn new_window(&mut self) -> Result<()> {
+        let id = self.alloc_pane_id();
+        let window = Window::new(id, self.pane_area(), self.events.clone())?;
+        self.windows.push(window);
+        self.active = self.windows.len() - 1;
+        Ok(())
+    }
+
+    fn split(&mut self, split: Split) -> Result<()> {
+        let id = self.alloc_pane_id();
+        let area = self.pane_area();
+        let events = self.events.clone();
+        self.active_window_mut().split(id, split, area, events)
+    }
+
+    fn close_pane(&mut self, id: PaneId) {
+        let area = self.pane_area();
+        let Some(index) = self.windows.iter().position(|w| w.panes.contains_key(&id)) else {
+            return;
+        };
+        if self.windows[index].remove_pane(id, area) {
+            self.close_window(index);
+        }
+    }
+
+    fn close_window(&mut self, index: usize) {
+        self.windows.remove(index);
+        if self.windows.is_empty() {
+            self.quit = true;
+            return;
+        }
+        if self.active > index || self.active >= self.windows.len() {
+            self.active -= 1;
+        }
+    }
+}
