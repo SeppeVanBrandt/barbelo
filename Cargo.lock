@@ -21,6 +21,7 @@ dependencies = [
  "anyhow",
  "base64",
  "crossterm",
+ "libc",
  "portable-pty",
  "vt100",
 ]

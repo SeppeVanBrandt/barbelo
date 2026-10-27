@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::sync::mpsc::Sender;
 
 use anyhow::Result;
 
-use crate::app::AppEvent;
 use crate::layout::{Direction, Layout, Node, Rect, Split, neighbor};
-use crate::pane::{Pane, PaneId};
+use crate::pane::{Pane, PaneContext, PaneId};
 
 pub struct Window {
     root: Node,
@@ -14,8 +12,8 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(id: PaneId, area: Rect, events: Sender<AppEvent>) -> Result<Self> {
-        let pane = Pane::spawn(id, area.h, area.w, events)?;
+    pub fn new(id: PaneId, area: Rect, ctx: PaneContext) -> Result<Self> {
+        let pane = Pane::spawn(id, area.h, area.w, ctx)?;
         Ok(Self {
             root: Node::Leaf(id),
             panes: HashMap::from([(id, pane)]),
@@ -31,10 +29,10 @@ impl Window {
         self.panes.get_mut(&self.active).expect("active pane exists")
     }
 
-    pub fn split(&mut self, id: PaneId, split: Split, area: Rect, events: Sender<AppEvent>) -> Result<()> {
+    pub fn split(&mut self, id: PaneId, split: Split, area: Rect, ctx: PaneContext) -> Result<()> {
         self.root.split(self.active, id, split);
         let rect = self.layout(area).rect_of(id).expect("new pane in layout");
-        match Pane::spawn(id, rect.h, rect.w, events) {
+        match Pane::spawn(id, rect.h, rect.w, ctx) {
             Ok(pane) => {
                 self.panes.insert(id, pane);
                 self.active = id;

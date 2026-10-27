@@ -1,5 +1,6 @@
 use std::io::{self, BufWriter, Write};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -10,7 +11,8 @@ use crate::clipboard;
 use crate::copy::{Action, Mode};
 use crate::keys;
 use crate::layout::{Direction, Rect, Split};
-use crate::pane::PaneId;
+use crate::pane::{PaneContext, PaneId};
+use crate::queries::TerminalColors;
 use crate::render;
 use crate::window::Window;
 
@@ -49,12 +51,12 @@ pub struct App {
     /// Escape sequences for the outer terminal, written before the next frame.
     pending_output: Vec<u8>,
     next_pane_id: PaneId,
-    events: Sender<AppEvent>,
+    ctx: PaneContext,
     quit: bool,
 }
 
 impl App {
-    pub fn new(config: Config) -> Result<(Self, Receiver<AppEvent>)> {
+    pub fn new(config: Config, colors: TerminalColors) -> Result<(Self, Receiver<AppEvent>)> {
         let (tx, rx) = mpsc::channel();
         let mut app = Self {
             config,
@@ -66,7 +68,10 @@ impl App {
             paste_buffer: None,
             pending_output: Vec::new(),
             next_pane_id: 0,
-            events: tx,
+            ctx: PaneContext {
+                events: tx,
+                colors: Arc::new(colors),
+            },
             quit: false,
         };
         app.new_window()?;
@@ -74,7 +79,7 @@ impl App {
     }
 
     pub fn run(mut self, rx: Receiver<AppEvent>) -> Result<()> {
-        let input = self.events.clone();
+        let input = self.ctx.events.clone();
         thread::spawn(move || {
             while let Ok(ev) = event::read() {
                 if input.send(AppEvent::Input(ev)).is_err() {
@@ -294,7 +299,7 @@ impl App {
 
     fn new_window(&mut self) -> Result<()> {
         let id = self.alloc_pane_id();
-        let window = Window::new(id, self.pane_area(), self.events.clone())?;
+        let window = Window::new(id, self.pane_area(), self.ctx.clone())?;
         self.windows.push(window);
         self.active = self.windows.len() - 1;
         Ok(())
@@ -303,8 +308,8 @@ impl App {
     fn split(&mut self, split: Split) -> Result<()> {
         let id = self.alloc_pane_id();
         let area = self.pane_area();
-        let events = self.events.clone();
-        self.active_window_mut().split(id, split, area, events)
+        let ctx = self.ctx.clone();
+        self.active_window_mut().split(id, split, area, ctx)
     }
 
     fn close_pane(&mut self, id: PaneId) {

@@ -4,6 +4,7 @@ mod copy;
 mod keys;
 mod layout;
 mod pane;
+mod queries;
 mod render;
 mod window;
 
@@ -18,6 +19,7 @@ use crossterm::terminal::{
 };
 
 use app::{App, Config};
+use queries::TerminalColors;
 
 fn main() -> Result<()> {
     if std::env::var_os("BARBELO").is_some() {
@@ -33,7 +35,8 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
 
-    let result = App::new(Config::default()).and_then(|(app, rx)| app.run(rx));
+    let colors = TerminalColors::query();
+    let result = App::new(Config::default(), colors).and_then(|(app, rx)| app.run(rx));
 
     restore_terminal();
     result

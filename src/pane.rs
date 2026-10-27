@@ -9,25 +9,33 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 
 use crate::app::AppEvent;
 use crate::copy::CopyMode;
+use crate::queries::{Responder, TerminalColors};
 
 pub type PaneId = usize;
 
 const SCROLLBACK: usize = 1000;
 
+/// What every new pane needs from the app.
+#[derive(Clone)]
+pub struct PaneContext {
+    pub events: Sender<AppEvent>,
+    pub colors: Arc<TerminalColors>,
+}
+
 /// A single shell running in a pseudo-terminal, together with the emulated
 /// screen state built from its output.
 pub struct Pane {
-    pub parser: Arc<Mutex<vt100::Parser>>,
+    pub parser: Arc<Mutex<vt100::Parser<Responder>>>,
     /// Set while the pane is in normal or visual mode.
     pub copy: Option<CopyMode>,
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
     size: (u16, u16),
 }
 
 impl Pane {
-    pub fn spawn(id: PaneId, rows: u16, cols: u16, events: Sender<AppEvent>) -> Result<Self> {
+    pub fn spawn(id: PaneId, rows: u16, cols: u16, ctx: PaneContext) -> Result<Self> {
         let (rows, cols) = (rows.max(1), cols.max(1));
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
@@ -46,22 +54,36 @@ impl Pane {
             .context("failed to spawn shell")?;
         drop(pair.slave);
 
-        let parser = Arc::new(Mutex::new(vt100::Parser::new(
+        let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
             nz(rows),
             nz(cols),
             SCROLLBACK,
+            Responder::new(ctx.colors),
         )));
         let mut reader = pair.master.try_clone_reader()?;
-        let writer = pair.master.take_writer()?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
 
         let reader_parser = Arc::clone(&parser);
+        let reader_writer = Arc::clone(&writer);
+        let events = ctx.events;
         thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        reader_parser.lock().unwrap().process(&buf[..n]);
+                        let replies = {
+                            let mut parser = reader_parser.lock().unwrap();
+                            parser.process(&buf[..n]);
+                            std::mem::take(&mut parser.callbacks_mut().replies)
+                        };
+                        // Answer terminal queries straight away; programs
+                        // often block until they get a reply.
+                        if !replies.is_empty() {
+                            let mut writer = reader_writer.lock().unwrap();
+                            let _ = writer.write_all(&replies);
+                            let _ = writer.flush();
+                        }
                         if events.send(AppEvent::PaneOutput).is_err() {
                             return;
                         }
@@ -89,8 +111,9 @@ impl Pane {
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
-        let _ = self.writer.write_all(bytes);
-        let _ = self.writer.flush();
+        let mut writer = self.writer.lock().unwrap();
+        let _ = writer.write_all(bytes);
+        let _ = writer.flush();
     }
 
     pub fn resize(&mut self, rows: u16, cols: u16) {
