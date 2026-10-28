@@ -156,15 +156,9 @@ impl Window {
     /// The window's entry in the status bar: `format` with `{number}`,
     /// `{name}` (see [`Window::name`], using `name_format`), `{flags}` and
     /// the active pane's `{process}`, `{dir}` and `{path}` filled in.
-    pub fn status_entry(&self, format: &str, name_format: &str, number: usize, active: bool) -> String {
-        // Never empty, so entries keep their width when another window
-        // becomes active.
-        let flags = match (active, self.zoomed) {
-            (true, true) => "*Z",
-            (true, false) => "*",
-            (false, true) => "Z",
-            (false, false) => " ",
-        };
+    pub fn status_entry(&self, format: &str, name_format: &str, number: usize) -> String {
+        // A space when not zoomed, so entries keep their width.
+        let flags = if self.zoomed { "*" } else { " " };
         let entry = self
             .fill_pane_fields(format)
             .replace("{number}", &number.to_string())

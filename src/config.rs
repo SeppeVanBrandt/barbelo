@@ -56,7 +56,7 @@ impl Default for StatusConfig {
             greek: false,
             clock: false,
             clock_format: "%H:%M".into(),
-            window_format: "{number}:{name}{flags} ".into(),
+            window_format: "{number}:{name}{flags}".into(),
             active_window_format: None,
         }
     }

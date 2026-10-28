@@ -31,7 +31,8 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` ] ``       | Paste the last copied text              |
 | `` ` q ``       | Quit                                    |
 
-A zoomed window is marked `Z` in the status bar. Moving focus, splitting or
+A zoomed window is marked `*` in the status bar, and the active window is
+shown in bold. Moving focus, splitting or
 closing a pane unzooms it.
 
 ## Modes
@@ -99,7 +100,7 @@ color_by_mode = false       # true paints the whole bar in the mode's colors
 greek = false               # true shows βαρβηλώ instead of barbelo
 clock = false               # true shows the time at the right end of the bar
 clock_format = "%H:%M"      # strftime codes, e.g. "%a %d %b %H:%M:%S"
-window_format = "{number}:{name}{flags} "   # each window's entry, see below
+window_format = "{number}:{name}{flags}"    # each window's entry, see below
 # active_window_format      # the active window's entry; defaults to window_format
 
 [colors]
@@ -137,7 +138,7 @@ Window entries in the status bar can use these placeholders:
 |-------------|-------|
 | `{number}`  | Window number, from 1 |
 | `{name}`    | The name given with `` ` , ``, or else `windows.name` filled in |
-| `{flags}`   | `*` for the active window, `Z` when zoomed, otherwise a space |
+| `{flags}`   | `*` when the window is zoomed, otherwise a space |
 | `{process}` | Foreground process of the active pane |
 | `{dir}`     | Name of that process's working directory |
 | `{path}`    | The whole working directory, with `~` for home |
