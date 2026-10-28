@@ -36,7 +36,8 @@ closing a pane unzooms it.
 
 ## Modes
 
-Each pane is in one of three modes, shown at the left of the status bar.
+Each pane is in one of three modes. Outside insert mode, the mode's name
+replaces barbelo at the left of the status bar.
 
 - **INSERT**: the regular terminal; keys go to the program in the pane.
 - **NORMAL**: a frozen snapshot of the pane's history (1000 lines), navigated
@@ -93,7 +94,7 @@ these are the defaults:
 prefix = "`"                # a single key, or with Ctrl/Alt: "C-a", "M-a"
 
 [status]
-show_insert = true          # false hides the INSERT label
+show_insert = false         # true shows INSERT instead of barbelo in insert mode
 color_by_mode = false       # true paints the whole bar in the mode's colors
 greek = false               # true shows βαρβηλώ instead of barbelo
 

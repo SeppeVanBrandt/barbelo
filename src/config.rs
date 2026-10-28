@@ -23,7 +23,7 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StatusConfig {
-    /// Show the mode label in insert mode too, not just in the other modes.
+    /// Show INSERT instead of the name in insert mode.
     pub show_insert: bool,
     /// Paint the whole bar in the current mode's colors.
     pub color_by_mode: bool,
@@ -34,7 +34,7 @@ pub struct StatusConfig {
 impl Default for StatusConfig {
     fn default() -> Self {
         Self {
-            show_insert: true,
+            show_insert: false,
             color_by_mode: false,
             greek: false,
         }
@@ -301,7 +301,7 @@ mod tests {
     fn empty_config_is_default() {
         let config = parse("").unwrap();
         assert_eq!(config.prefix, Prefix::default());
-        assert!(config.status.show_insert);
+        assert!(!config.status.show_insert);
         assert_eq!(config.colors.normal_bg, ConfigColor(Color::Blue));
         assert_eq!(config.windows.name, "{process}");
     }
@@ -312,7 +312,7 @@ mod tests {
             r##"
             prefix = "C-a"
             [status]
-            show_insert = false
+            show_insert = true
             [colors]
             status_bg = "#1e1e2e"
             normal_bg = 208
@@ -323,7 +323,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(config.prefix.0, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL));
-        assert!(!config.status.show_insert);
+        assert!(config.status.show_insert);
         assert!(!config.status.color_by_mode);
         assert_eq!(config.colors.status_bg.0, Color::Rgb { r: 0x1e, g: 0x1e, b: 0x2e });
         assert_eq!(config.colors.normal_bg.0, Color::AnsiValue(208));

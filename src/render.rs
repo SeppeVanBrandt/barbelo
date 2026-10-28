@@ -317,16 +317,22 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     let colors = &app.config.colors;
     let status = &app.config.status;
 
+    // The mode's name takes the place of the title, except in insert mode.
+    let title = if status.greek { "[βαρβηλώ]" } else { "[barbelo]" };
     let (label, fg, bg) = match app.mode() {
-        _ if app.hinting() => (Some(" HINTS  "), colors.hints_fg, colors.hints_bg),
+        _ if app.hinting() => (Some("HINTS"), colors.hints_fg, colors.hints_bg),
         None => {
             let (fg, bg) = colors.insert();
-            (status.show_insert.then_some(" INSERT "), fg, bg)
+            (status.show_insert.then_some("INSERT"), fg, bg)
         }
-        Some(Mode::Normal) => (Some(" NORMAL "), colors.normal_fg, colors.normal_bg),
-        Some(Mode::Visual) => (Some(" VISUAL "), colors.visual_fg, colors.visual_bg),
-        Some(Mode::VisualLine) => (Some(" V-LINE "), colors.visual_fg, colors.visual_bg),
+        Some(Mode::Normal) => (Some("NORMAL"), colors.normal_fg, colors.normal_bg),
+        Some(Mode::Visual) => (Some("VISUAL"), colors.visual_fg, colors.visual_bg),
+        Some(Mode::VisualLine) => (Some("V-LINE"), colors.visual_fg, colors.visual_bg),
     };
+    // Wide enough for the title and every mode name, so nothing after it
+    // shifts when the mode changes.
+    let slot_width = title.chars().count().max("INSERT".len());
+    let slot = format!(" {:^slot_width$} ", label.unwrap_or(title));
     let (bar_fg, bar_bg) = if status.color_by_mode {
         (fg, bg)
     } else {
@@ -339,22 +345,17 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         bg: bar_bg.0,
     };
 
-    let mut segments = Vec::new();
-    if let Some(label) = label {
-        segments.push(Segment {
-            fg: fg.0,
-            bg: bg.0,
-            ..segment(label.into(), true)
-        });
-    }
+    let mut segments = vec![Segment {
+        fg: fg.0,
+        bg: bg.0,
+        ..segment(slot, label.is_some())
+    }];
     let mut cursor = None;
     if let Some(text) = &app.rename {
         segments.push(segment(format!(" rename window: {text}"), false));
         let len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
         cursor = Some((len.min(cols.saturating_sub(1) as usize) as u16, rows - 1));
     } else {
-        let title = if status.greek { " [βαρβηλώ] " } else { " [barbelo] " };
-        segments.push(segment(title.into(), false));
         for (i, window) in app.windows.iter().enumerate() {
             let active = i == app.active;
             let flags = match (active, window.zoomed) {
