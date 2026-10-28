@@ -9,7 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::Color;
 use serde::Deserialize;
 
-use crate::layout::BorderStyle;
+use crate::layout::{BorderChars, BorderStyle};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -119,6 +119,18 @@ pub struct WindowsConfig {
     pub name: String,
     /// `shared` lines between panes, or a `boxed` frame around each pane.
     pub borders: BorderStyle,
+    pub border_chars: BorderChars,
+    /// Characters for the active pane's border; `border_chars` unless set.
+    pub active_border_chars: Option<BorderChars>,
+}
+
+impl WindowsConfig {
+    pub fn border_chars(&self, active: bool) -> BorderChars {
+        match self.active_border_chars {
+            Some(chars) if active => chars,
+            _ => self.border_chars,
+        }
+    }
 }
 
 impl Default for WindowsConfig {
@@ -126,6 +138,8 @@ impl Default for WindowsConfig {
         Self {
             name: "{process}".into(),
             borders: BorderStyle::Shared,
+            border_chars: BorderChars::Light,
+            active_border_chars: None,
         }
     }
 }
@@ -332,6 +346,7 @@ mod tests {
             alphabet = "jkl"
             [windows]
             borders = "boxed"
+            active_border_chars = "heavy"
             "##,
         )
         .unwrap();
@@ -345,6 +360,8 @@ mod tests {
         assert_eq!(config.colors.insert().1, config.colors.status_bg);
         assert_eq!(config.hints.alphabet.0, b"jkl");
         assert_eq!(config.windows.borders, BorderStyle::Boxed);
+        assert_eq!(config.windows.border_chars(true), BorderChars::Heavy);
+        assert_eq!(config.windows.border_chars(false), BorderChars::Light);
     }
 
     #[test]

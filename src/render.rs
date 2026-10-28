@@ -12,7 +12,7 @@ use crate::clock;
 use crate::config::Config;
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
-use crate::layout::{Border, Rect};
+use crate::layout::{Border, BorderChars, Rect};
 use crate::pane::PaneId;
 
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
@@ -278,29 +278,73 @@ fn draw_borders(
                 continue;
             }
             let (xi, yi) = (x as isize, y as isize);
+            // Index into `Glyphs::lines`.
             let glyph = match (at(xi, yi - 1), at(xi, yi + 1), at(xi - 1, yi), at(xi + 1, yi)) {
-                (true, true, true, true) => '┼',
-                (true, true, true, false) => '┤',
-                (true, true, false, true) => '├',
-                (true, false, true, true) => '┴',
-                (false, true, true, true) => '┬',
-                (true, false, true, false) => '┘',
-                (true, false, false, true) => '└',
-                (false, true, true, false) => '┐',
-                (false, true, false, true) => '┌',
-                (_, _, false, false) => '│',
-                _ => '─',
+                (true, true, true, true) => 10,
+                (true, true, true, false) => 7,
+                (true, true, false, true) => 6,
+                (true, false, true, true) => 9,
+                (false, true, true, true) => 8,
+                (true, false, true, false) => 5,
+                (true, false, false, true) => 4,
+                (false, true, true, false) => 3,
+                (false, true, false, true) => 2,
+                (_, _, false, false) => 1,
+                _ => 0,
             };
             let (x, y) = (x as u16, y as u16);
             let touches_active = active.is_some_and(|r| {
                 x + 1 >= r.x && x <= r.right() && y + 1 >= r.y && y <= r.bottom()
             });
-            let colors = &config.colors;
-            let fg = if touches_active { colors.active_border } else { colors.inactive_border };
-            queue!(out, MoveTo(area.x + x, area.y + y), SetForegroundColor(fg.0), Print(glyph))?;
+            let glyphs = border_style(config, touches_active, out)?;
+            queue!(out, MoveTo(area.x + x, area.y + y), Print(glyphs.lines[glyph]))?;
         }
     }
     queue!(out, SetAttribute(Attribute::Reset))
+}
+
+/// The characters a border can be drawn with.
+struct Glyphs {
+    /// `─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼`, for lines shared between panes.
+    lines: [char; 11],
+    /// Top, bottom, left and right edge, then `┌ ┐ └ ┘`, for a box around
+    /// one pane.
+    frame: [char; 8],
+}
+
+impl Glyphs {
+    fn of(chars: BorderChars) -> Self {
+        let (lines, frame) = match chars {
+            BorderChars::Light => ("─│┌┐└┘├┤┬┴┼", "──││┌┐└┘"),
+            BorderChars::Heavy => ("━┃┏┓┗┛┣┫┳┻╋", "━━┃┃┏┓┗┛"),
+            BorderChars::Double => ("═║╔╗╚╝╠╣╦╩╬", "══║║╔╗╚╝"),
+            BorderChars::Rounded => ("─│╭╮╰╯├┤┬┴┼", "──││╭╮╰╯"),
+            // Half blocks hug the outside of a box; shared lines are full.
+            BorderChars::Block => ("███████████", "▀▄▌▐▛▜▙▟"),
+            BorderChars::Solid => ("           ", "        "),
+        };
+        Self {
+            lines: char_array(lines),
+            frame: char_array(frame),
+        }
+    }
+}
+
+fn char_array<const N: usize>(s: &str) -> [char; N] {
+    let chars: Vec<char> = s.chars().collect();
+    chars.try_into().expect("glyph count")
+}
+
+/// Sets the colors for the active or an inactive border and returns its
+/// characters.
+fn border_style(config: &Config, active: bool, out: &mut impl Write) -> io::Result<Glyphs> {
+    let colors = &config.colors;
+    let color = if active { colors.active_border } else { colors.inactive_border };
+    let chars = config.windows.border_chars(active);
+    // Solid borders are blank cells painted in the border color.
+    let bg = if chars == BorderChars::Solid { color.0 } else { Color::Reset };
+    queue!(out, SetForegroundColor(color.0), SetBackgroundColor(bg))?;
+    Ok(Glyphs::of(chars))
 }
 
 /// Draws a box around each pane, highlighting the active one.
@@ -314,15 +358,15 @@ fn draw_frames(
         if r.w < 2 || r.h < 2 {
             continue;
         }
-        let colors = &config.colors;
-        let fg = if id == active { colors.active_border } else { colors.inactive_border };
-        let line = "─".repeat(r.w as usize - 2);
-        queue!(out, SetForegroundColor(fg.0))?;
-        queue!(out, MoveTo(r.x, r.y), Print(format!("┌{line}┐")))?;
+        let [top, bottom, left, right, tl, tr, bl, br] = border_style(config, id == active, out)?.frame;
+        let inner = r.w as usize - 2;
+        let top: String = std::iter::repeat_n(top, inner).collect();
+        let bottom: String = std::iter::repeat_n(bottom, inner).collect();
+        queue!(out, MoveTo(r.x, r.y), Print(format!("{tl}{top}{tr}")))?;
         for y in r.y + 1..r.bottom() - 1 {
-            queue!(out, MoveTo(r.x, y), Print('│'), MoveTo(r.right() - 1, y), Print('│'))?;
+            queue!(out, MoveTo(r.x, y), Print(left), MoveTo(r.right() - 1, y), Print(right))?;
         }
-        queue!(out, MoveTo(r.x, r.bottom() - 1), Print(format!("└{line}┘")))?;
+        queue!(out, MoveTo(r.x, r.bottom() - 1), Print(format!("{bl}{bottom}{br}")))?;
     }
     queue!(out, SetAttribute(Attribute::Reset))
 }

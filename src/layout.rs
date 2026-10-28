@@ -41,6 +41,21 @@ pub enum BorderStyle {
     Boxed,
 }
 
+/// Characters borders are drawn with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BorderChars {
+    #[default]
+    Light,
+    Heavy,
+    Double,
+    Rounded,
+    /// Solid lines made of (half) blocks.
+    Block,
+    /// Cells filled with the border color.
+    Solid,
+}
+
 /// How a split arranges its two children.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Split {
