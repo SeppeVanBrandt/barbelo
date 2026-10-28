@@ -18,6 +18,19 @@ use crate::pane::PaneId;
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     queue!(out, BeginSynchronizedUpdate, Hide)?;
 
+    if let Some((_, saver)) = &app.screensaver {
+        let (cols, rows) = app.size;
+        let full = Rect {
+            x: 0,
+            y: 0,
+            w: cols,
+            h: rows,
+        };
+        draw_screen(out, saver.parser.lock().unwrap().screen(), full)?;
+        queue!(out, EndSynchronizedUpdate)?;
+        return out.flush();
+    }
+
     let area = app.pane_area();
     let window = app.active_window();
     let layout = window.layout(area);

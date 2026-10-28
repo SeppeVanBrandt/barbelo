@@ -29,11 +29,19 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |
 | `` ` f ``       | Hint mode: copy text by typing its label |
 | `` ` ] ``       | Paste the last copied text              |
+| `` ` s ``       | Start the screensaver                   |
 | `` ` q ``       | Quit                                    |
 
 A zoomed window is marked `*` in the status bar, and the active window is
 shown in bold. Moving focus, splitting or
 closing a pane unzooms it.
+
+## Screensaver
+
+[pipes.sh](https://github.com/pipeseroni/pipes.sh) runs full screen with
+`` ` s ``, or by itself after `screensaver.timeout` seconds without input.
+Any key ends it; that key isn't passed on. pipes.sh needs to be installed
+and in `$PATH`, or `screensaver.command` can point at the script.
 
 ## Modes
 
@@ -130,6 +138,22 @@ name = "{process}"          # also {dir} (directory name) and {path} (full direc
 borders = "shared"          # or "boxed": a frame around every pane
 border_chars = "light"      # light, heavy, double, rounded, block or solid
 # active_border_chars       # for the active pane; defaults to border_chars
+
+[screensaver]
+command = "pipes.sh"
+timeout = 0                 # seconds idle before it starts; 0: only with ` s
+# These go to pipes.sh, which uses its own defaults for those not set:
+# pipes = 1                 # number of pipes (-p)
+# types = [0]               # pipe types (-t): 0-9, or "c" + 16 characters
+# colors = [1, 2, "#ff8800"]  # colors (-c): 256-color indices or "#rrggbb"
+# fps = 75                  # frames per second, 20-100 (-f)
+# straight = 13             # odds 1 in N of going straight, 5-15 (-s)
+# reset = 2000              # clear after N characters, 0 for never (-r)
+random_start = false        # random start positions and directions (-R)
+bold = true                 # false: no bold (-B)
+color = true                # false: no color (-C)
+keep_style = false          # keep color and type when crossing edges (-K)
+args = []                   # anything else, passed on as is
 ```
 
 Window entries in the status bar can use these placeholders:

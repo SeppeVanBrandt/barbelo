@@ -21,6 +21,7 @@ pub struct Config {
     pub colors: Colors,
     pub hints: HintsConfig,
     pub windows: WindowsConfig,
+    pub screensaver: ScreensaverConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +163,139 @@ impl Default for WindowsConfig {
             borders: BorderStyle::Shared,
             border_chars: BorderChars::Light,
             active_border_chars: None,
+        }
+    }
+}
+
+/// The screensaver runs pipes.sh full screen. Its options are passed on
+/// only when set, so pipes.sh's own defaults apply otherwise.
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ScreensaverConfig {
+    pub command: String,
+    /// Seconds without input before it starts; 0 starts it only by hand.
+    pub timeout: u64,
+    /// Number of pipes (`-p`).
+    pub pipes: Option<u32>,
+    /// Pipe types (`-t`): an index into pipes.sh's sets, or `c` followed by
+    /// 16 characters.
+    pub types: Vec<PipesValue>,
+    /// Pipe colors (`-c`): color indices, or `#` and a hex value.
+    pub colors: Vec<PipesValue>,
+    /// Frames per second, 20-100 (`-f`).
+    pub fps: Option<u32>,
+    /// A pipe goes straight with odds 1 in `straight`, 5-15 (`-s`).
+    pub straight: Option<u32>,
+    /// Clear the screen after this many characters, 0 for never (`-r`).
+    pub reset: Option<u32>,
+    /// Random starting positions and directions (`-R`).
+    pub random_start: bool,
+    /// `false` turns off bold (`-B`).
+    pub bold: bool,
+    /// `false` turns off color (`-C`).
+    pub color: bool,
+    /// Pipes keep their color and type when they cross an edge (`-K`).
+    pub keep_style: bool,
+    /// More arguments, passed on as they are.
+    pub args: Vec<String>,
+}
+
+impl Default for ScreensaverConfig {
+    fn default() -> Self {
+        Self {
+            command: "pipes.sh".into(),
+            timeout: 0,
+            pipes: None,
+            types: Vec::new(),
+            colors: Vec::new(),
+            fps: None,
+            straight: None,
+            reset: None,
+            random_start: false,
+            bold: true,
+            color: true,
+            keep_style: false,
+            args: Vec::new(),
+        }
+    }
+}
+
+impl ScreensaverConfig {
+    /// Command-line arguments for pipes.sh.
+    pub fn args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        let mut opt = |flag: &str, value: String| {
+            args.push(flag.to_string());
+            args.push(value);
+        };
+        if let Some(n) = self.pipes {
+            opt("-p", n.to_string());
+        }
+        for t in &self.types {
+            opt("-t", t.to_string());
+        }
+        for c in &self.colors {
+            opt("-c", c.to_string());
+        }
+        if let Some(n) = self.fps {
+            opt("-f", n.to_string());
+        }
+        if let Some(n) = self.straight {
+            opt("-s", n.to_string());
+        }
+        if let Some(n) = self.reset {
+            opt("-r", n.to_string());
+        }
+        let flags = [
+            (self.random_start, "-R"),
+            (!self.bold, "-B"),
+            (!self.color, "-C"),
+            (self.keep_style, "-K"),
+        ];
+        for (set, flag) in flags {
+            if set {
+                args.push(flag.into());
+            }
+        }
+        args.extend(self.args.iter().cloned());
+        args
+    }
+
+    /// Catches values pipes.sh would refuse, since it would just quit.
+    fn check(&self) -> Result<(), String> {
+        let ranges = [
+            ("pipes", self.pipes, 1..=u32::MAX),
+            ("fps", self.fps, 20..=100),
+            ("straight", self.straight, 5..=15),
+        ];
+        for (name, value, range) in ranges {
+            if let Some(v) = value
+                && !range.contains(&v)
+            {
+                let (lo, hi) = (range.start(), range.end());
+                return Err(match *hi {
+                    u32::MAX => format!("screensaver.{name} must be at least {lo}"),
+                    _ => format!("screensaver.{name} must be between {lo} and {hi}"),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A pipes.sh value that is either a number or a string.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+pub enum PipesValue {
+    Number(u32),
+    Text(String),
+}
+
+impl std::fmt::Display for PipesValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PipesValue::Number(n) => write!(f, "{n}"),
+            PipesValue::Text(s) => f.write_str(s),
         }
     }
 }
@@ -339,6 +473,7 @@ pub fn load() -> Result<Config> {
 fn parse(text: &str) -> Result<Config, String> {
     let config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
     config.check_formats()?;
+    config.screensaver.check()?;
     Ok(config)
 }
 
@@ -417,6 +552,35 @@ mod tests {
         assert_eq!(config.windows.borders, BorderStyle::Boxed);
         assert_eq!(config.windows.border_chars(true), BorderChars::Heavy);
         assert_eq!(config.windows.border_chars(false), BorderChars::Light);
+    }
+
+    #[test]
+    fn screensaver_args() {
+        let config = parse("").unwrap();
+        assert!(config.screensaver.args().is_empty());
+        let config = parse(
+            r##"
+            [screensaver]
+            pipes = 3
+            types = [0, 5, "c┃┏┓┛━┓  ┗┃┛┗ ┏━"]
+            colors = [1, "#ff8800"]
+            fps = 60
+            bold = false
+            random_start = true
+            args = ["-K"]
+            "##,
+        )
+        .unwrap();
+        let args = config.screensaver.args();
+        assert_eq!(
+            args,
+            [
+                "-p", "3", "-t", "0", "-t", "5", "-t", "c┃┏┓┛━┓  ┗┃┛┗ ┏━", "-c", "1", "-c",
+                "#ff8800", "-f", "60", "-R", "-B", "-K"
+            ]
+        );
+        assert!(parse("[screensaver]\nfps = 10").is_err());
+        assert!(parse("[screensaver]\npipes = 0").is_err());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::io::{self, BufWriter, Write};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
@@ -6,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use portable_pty::CommandBuilder;
 
 use crate::clipboard;
 use crate::clock;
@@ -14,7 +16,7 @@ use crate::copy::{Action, Mode};
 use crate::hints;
 use crate::keys;
 use crate::layout::{Direction, Rect, Split};
-use crate::pane::{PaneContext, PaneId};
+use crate::pane::{Pane, PaneContext, PaneId};
 use crate::queries::TerminalColors;
 use crate::render;
 use crate::window::Window;
@@ -40,6 +42,10 @@ pub struct App {
     pub message: Option<String>,
     /// New name being typed for the active window.
     pub rename: Option<String>,
+    /// The screensaver while it runs, drawn over everything else.
+    pub screensaver: Option<(PaneId, Pane)>,
+    /// Time of the last key press or paste, for starting the screensaver.
+    last_input: Instant,
     /// Text from the last yank, pasted with prefix + `]`.
     paste_buffer: Option<String>,
     /// Escape sequences for the outer terminal, written before the next frame.
@@ -60,6 +66,8 @@ impl App {
             prefix_pending: false,
             message: None,
             rename: None,
+            screensaver: None,
+            last_input: Instant::now(),
             paste_buffer: None,
             pending_output: Vec::new(),
             next_pane_id: 0,
@@ -91,18 +99,16 @@ impl App {
         render::draw(&self, &mut out)?;
         let mut last_frame = Instant::now();
         loop {
-            // While scrolling is animating, wake up every frame even without events.
-            let ev = if self.animating() {
-                match rx.recv_timeout(FRAME) {
+            let ev = match self.wakeup() {
+                Some(timeout) => match rx.recv_timeout(timeout) {
                     Ok(ev) => Some(ev),
                     Err(RecvTimeoutError::Timeout) => None,
                     Err(RecvTimeoutError::Disconnected) => break,
-                }
-            } else {
-                match rx.recv() {
+                },
+                None => match rx.recv() {
                     Ok(ev) => Some(ev),
                     Err(_) => break,
-                }
+                },
             };
             if let Some(ev) = ev {
                 self.handle(ev);
@@ -113,6 +119,9 @@ impl App {
             }
             if self.quit {
                 break;
+            }
+            if self.screensaver_deadline().is_some_and(|t| t <= Instant::now()) {
+                self.start_screensaver();
             }
 
             let now = Instant::now();
@@ -126,6 +135,52 @@ impl App {
             render::draw(&self, &mut out)?;
         }
         Ok(())
+    }
+
+    /// How long the event loop may sleep without an event, or `None` for as
+    /// long as it takes.
+    fn wakeup(&self) -> Option<Duration> {
+        // While scrolling is animating, wake up every frame.
+        let frame = self.animating().then_some(FRAME);
+        let idle = self
+            .screensaver_deadline()
+            .map(|t| t.saturating_duration_since(Instant::now()));
+        match (frame, idle) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
+    /// When the screensaver starts unless there is input before then.
+    fn screensaver_deadline(&self) -> Option<Instant> {
+        let timeout = self.config.screensaver.timeout;
+        (timeout > 0 && self.screensaver.is_none())
+            .then(|| self.last_input + Duration::from_secs(timeout))
+    }
+
+    fn start_screensaver(&mut self) {
+        // Count this as input, so a screensaver that fails to start isn't
+        // retried until the timeout has passed again.
+        self.last_input = Instant::now();
+        if self.screensaver.is_some() {
+            return;
+        }
+        let config = &self.config.screensaver;
+        if !command_exists(&config.command) {
+            self.message = Some(format!(
+                "{} not found: install it or set screensaver.command",
+                config.command
+            ));
+            return;
+        }
+        let mut cmd = CommandBuilder::new(&config.command);
+        cmd.args(config.args());
+        let id = self.alloc_pane_id();
+        let (cols, rows) = self.size;
+        match Pane::spawn_command(id, rows, cols, self.ctx.clone(), cmd) {
+            Ok(pane) => self.screensaver = Some((id, pane)),
+            Err(e) => self.message = Some(format!("can't start screensaver: {e}")),
+        }
     }
 
     fn animating(&self) -> bool {
@@ -182,15 +237,30 @@ impl App {
     fn handle(&mut self, ev: AppEvent) {
         match ev {
             AppEvent::PaneOutput | AppEvent::Clock => {}
+            AppEvent::PaneExited(id) if self.screensaver.as_ref().is_some_and(|(s, _)| *s == id) => {
+                self.screensaver = None;
+                self.last_input = Instant::now();
+                self.message = Some("screensaver exited".into());
+            }
             AppEvent::PaneExited(id) => self.close_pane(id),
             AppEvent::Input(Event::Key(key)) if key.kind != KeyEventKind::Release => {
-                self.handle_key(key)
+                self.last_input = Instant::now();
+                // Any key ends the screensaver, and does nothing else.
+                if self.screensaver.take().is_none() {
+                    self.handle_key(key);
+                }
             }
             AppEvent::Input(Event::Paste(text)) => {
-                self.paste(&text);
+                self.last_input = Instant::now();
+                if self.screensaver.take().is_none() {
+                    self.paste(&text);
+                }
             }
             AppEvent::Input(Event::Resize(cols, rows)) => {
                 self.size = (cols, rows);
+                if let Some((_, saver)) = &mut self.screensaver {
+                    saver.resize(rows, cols);
+                }
                 let area = self.pane_area();
                 for window in &mut self.windows {
                     window.resize(area);
@@ -342,6 +412,7 @@ impl App {
                     self.paste(&text);
                 }
             }
+            KeyCode::Char('s') => self.start_screensaver(),
             KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
@@ -390,4 +461,13 @@ impl App {
             self.active -= 1;
         }
     }
+}
+
+/// Whether `command` is a path to a file, or a program found in `$PATH`.
+fn command_exists(command: &str) -> bool {
+    if command.contains('/') {
+        return Path::new(command).is_file();
+    }
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(command).is_file()))
 }
