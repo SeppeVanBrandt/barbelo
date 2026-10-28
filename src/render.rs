@@ -503,10 +503,14 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         bg: bar_bg.0,
     };
 
-    let mut left = vec![Segment {
-        fg: slot_fg.0,
-        bg: slot_bg.0,
-        ..segment(slot, label.is_some() || in_border)
+    let mut left = vec![match status.show_title {
+        true => Segment {
+            fg: slot_fg.0,
+            bg: slot_bg.0,
+            ..segment(slot, label.is_some() || in_border)
+        },
+        // Just the space the title would have started with.
+        false => segment(" ".into(), false),
     }];
     if let Some(text) = &app.rename {
         left.push(segment(format!(" rename window: {text}"), false));

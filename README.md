@@ -123,6 +123,7 @@ prefix = "`"                # a single key, or with Ctrl/Alt: "C-a", "M-a"
 
 [status]
 show_insert = false         # true shows INSERT instead of barbelo in insert mode
+show_title = true           # false hides [barbelo] and the mode names in its place
 color_by_mode = false       # true paints the whole bar in the mode's colors
 greek = false               # true shows βαρβηλώ instead of barbelo
 clock = false               # true shows the time at the right end of the bar

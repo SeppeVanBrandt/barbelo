@@ -29,6 +29,8 @@ pub struct Config {
 pub struct StatusConfig {
     /// Show INSERT instead of the name in insert mode.
     pub show_insert: bool,
+    /// Show the [barbelo] title, and the mode names that take its place.
+    pub show_title: bool,
     /// Paint the whole bar in the current mode's colors.
     pub color_by_mode: bool,
     /// Spell the name as βαρβηλώ.
@@ -56,6 +58,7 @@ impl Default for StatusConfig {
     fn default() -> Self {
         Self {
             show_insert: false,
+            show_title: true,
             color_by_mode: false,
             greek: false,
             clock: false,
