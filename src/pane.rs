@@ -39,23 +39,31 @@ pub struct Pane {
 }
 
 impl Pane {
+    /// Starts the user's shell in a new pane.
     pub fn spawn(id: PaneId, rows: u16, cols: u16, ctx: PaneContext) -> Result<Self> {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        Self::spawn_command(id, rows, cols, ctx, CommandBuilder::new(shell))
+            .context("failed to spawn shell")
+    }
+
+    pub fn spawn_command(
+        id: PaneId,
+        rows: u16,
+        cols: u16,
+        ctx: PaneContext,
+        mut cmd: CommandBuilder,
+    ) -> Result<Self> {
         let (rows, cols) = (rows.max(1), cols.max(1));
         let pair = native_pty_system()
             .openpty(pty_size(rows, cols))
             .context("failed to open pty")?;
 
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let mut cmd = CommandBuilder::new(shell);
         cmd.env("TERM", "xterm-256color");
         cmd.env("BARBELO", "1");
         if let Ok(cwd) = std::env::current_dir() {
             cmd.cwd(cwd);
         }
-        let child = pair
-            .slave
-            .spawn_command(cmd)
-            .context("failed to spawn shell")?;
+        let child = pair.slave.spawn_command(cmd)?;
         drop(pair.slave);
 
         let parser = Arc::new(Mutex::new(vt100::Parser::new_with_callbacks(
