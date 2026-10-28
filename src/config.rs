@@ -29,6 +29,10 @@ pub struct StatusConfig {
     pub color_by_mode: bool,
     /// Spell the name as βαρβηλώ.
     pub greek: bool,
+    /// Show the time at the right end of the bar.
+    pub clock: bool,
+    /// `strftime` format of the clock.
+    pub clock_format: String,
 }
 
 impl Default for StatusConfig {
@@ -37,6 +41,8 @@ impl Default for StatusConfig {
             show_insert: false,
             color_by_mode: false,
             greek: false,
+            clock: false,
+            clock_format: "%H:%M".into(),
         }
     }
 }

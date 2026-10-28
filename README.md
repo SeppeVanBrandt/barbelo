@@ -97,6 +97,8 @@ prefix = "`"                # a single key, or with Ctrl/Alt: "C-a", "M-a"
 show_insert = false         # true shows INSERT instead of barbelo in insert mode
 color_by_mode = false       # true paints the whole bar in the mode's colors
 greek = false               # true shows βαρβηλώ instead of barbelo
+clock = false               # true shows the time at the right end of the bar
+clock_format = "%H:%M"      # strftime codes, e.g. "%a %d %b %H:%M:%S"
 
 [colors]
 status_fg = "black"

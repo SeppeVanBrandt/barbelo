@@ -1,5 +1,6 @@
 mod app;
 mod clipboard;
+mod clock;
 mod config;
 mod copy;
 mod hints;

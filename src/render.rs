@@ -8,6 +8,7 @@ use crossterm::style::{
 use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 
 use crate::app::App;
+use crate::clock;
 use crate::config::Config;
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
@@ -376,11 +377,17 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         (None, false, Some((line, total))) => format!(" {line}/{total} "),
         (None, false, None) => String::new(),
     };
+    let clock = match status.clock {
+        true => format!(" {} ", clock::now(&status.clock_format)),
+        false => String::new(),
+    };
     let width = cols as usize;
     let left_len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
-    let gap = width.saturating_sub(left_len + right.chars().count());
+    let right_len = right.chars().count() + clock.chars().count();
+    let gap = width.saturating_sub(left_len + right_len);
     segments.push(segment(" ".repeat(gap), false));
     segments.push(segment(right, true));
+    segments.push(segment(clock, false));
 
     queue!(out, MoveTo(0, rows - 1), SetAttribute(Attribute::Reset))?;
     let mut remaining = width;

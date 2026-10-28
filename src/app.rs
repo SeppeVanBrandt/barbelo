@@ -8,6 +8,7 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::clipboard;
+use crate::clock;
 use crate::config::Config;
 use crate::copy::{Action, Mode};
 use crate::hints;
@@ -24,6 +25,8 @@ const FRAME: Duration = Duration::from_millis(8);
 pub enum AppEvent {
     Input(Event),
     PaneOutput,
+    /// The time shown in the status bar changed.
+    Clock,
     PaneExited(PaneId),
 }
 
@@ -79,6 +82,10 @@ impl App {
                 }
             }
         });
+
+        if self.config.status.clock {
+            clock::spawn(self.config.status.clock_format.clone(), self.ctx.events.clone());
+        }
 
         let mut out = BufWriter::with_capacity(1 << 16, io::stdout());
         render::draw(&self, &mut out)?;
@@ -174,7 +181,7 @@ impl App {
 
     fn handle(&mut self, ev: AppEvent) {
         match ev {
-            AppEvent::PaneOutput => {}
+            AppEvent::PaneOutput | AppEvent::Clock => {}
             AppEvent::PaneExited(id) => self.close_pane(id),
             AppEvent::Input(Event::Key(key)) if key.kind != KeyEventKind::Release => {
                 self.handle_key(key)
