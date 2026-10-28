@@ -5,7 +5,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
 use crate::clipboard;
 use crate::config::Config;
@@ -35,6 +35,8 @@ pub struct App {
     pub size: (u16, u16),
     pub prefix_pending: bool,
     pub message: Option<String>,
+    /// New name being typed for the active window.
+    pub rename: Option<String>,
     /// Text from the last yank, pasted with prefix + `]`.
     paste_buffer: Option<String>,
     /// Escape sequences for the outer terminal, written before the next frame.
@@ -54,6 +56,7 @@ impl App {
             size: crossterm::terminal::size()?,
             prefix_pending: false,
             message: None,
+            rename: None,
             paste_buffer: None,
             pending_output: Vec::new(),
             next_pane_id: 0,
@@ -193,7 +196,9 @@ impl App {
     fn handle_key(&mut self, key: KeyEvent) {
         self.message = None;
         let prefix = self.config.prefix.0;
-        if self.prefix_pending {
+        if self.rename.is_some() {
+            self.rename_key(key);
+        } else if self.prefix_pending {
             self.prefix_pending = false;
             if let Err(e) = self.command(key) {
                 self.message = Some(e.to_string());
@@ -221,6 +226,30 @@ impl App {
             }
         } else {
             self.send_key(key);
+        }
+    }
+
+    /// Edits the window name being typed. An empty name brings back the
+    /// automatic one.
+    fn rename_key(&mut self, key: KeyEvent) {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let Some(text) = &mut self.rename else {
+            return;
+        };
+        match key.code {
+            KeyCode::Enter => {
+                let name = text.trim().to_string();
+                self.active_window_mut().custom_name = (!name.is_empty()).then_some(name);
+                self.rename = None;
+            }
+            KeyCode::Esc => self.rename = None,
+            KeyCode::Char('c') if ctrl => self.rename = None,
+            KeyCode::Char('u') if ctrl => text.clear(),
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            KeyCode::Char(c) if !ctrl => text.push(c),
+            _ => {}
         }
     }
 
@@ -285,6 +314,9 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.active_window_mut().focus(Direction::Down, area),
             KeyCode::Char('o') => self.active_window_mut().focus_next(area),
             KeyCode::Char(';' | ':') => self.active_window_mut().focus_last(),
+            KeyCode::Char(',') => {
+                self.rename = Some(self.active_window().custom_name.clone().unwrap_or_default())
+            }
             KeyCode::Char('x') => {
                 let id = self.active_window().active;
                 self.close_pane(id);

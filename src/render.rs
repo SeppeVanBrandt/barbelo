@@ -54,9 +54,13 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
 
     let active_rect = layout.rect_of(window.active);
     draw_borders(out, &layout.borders, area, active_rect, &app.config)?;
-    draw_status(out, app)?;
+    let prompt_cursor = draw_status(out, app)?;
+    if prompt_cursor.is_some() {
+        cursor = prompt_cursor;
+    }
 
     let shape = match app.mode() {
+        _ if app.rename.is_some() => SetCursorStyle::DefaultUserShape,
         None => SetCursorStyle::DefaultUserShape,
         Some(_) => SetCursorStyle::SteadyBlock,
     };
@@ -303,10 +307,12 @@ struct Segment {
     bg: Color,
 }
 
-fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
+/// Draws the status bar. Returns where the cursor goes while a window name
+/// is being typed.
+fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>> {
     let (cols, rows) = app.size;
     if rows == 0 {
-        return Ok(());
+        return Ok(None);
     }
     let colors = &app.config.colors;
     let status = &app.config.status;
@@ -341,16 +347,24 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
             ..segment(label.into(), true)
         });
     }
-    let title = if status.greek { " [βαρβηλώ] " } else { " [barbelo] " };
-    segments.push(segment(title.into(), false));
-    for (i, window) in app.windows.iter().enumerate() {
-        let active = i == app.active;
-        let flag = if active { "*" } else { " " };
-        let name = window.name(&app.config.windows.name);
-        segments.push(segment(format!("{}:{name}{flag} ", i + 1), active));
+    let mut cursor = None;
+    if let Some(text) = &app.rename {
+        segments.push(segment(format!(" rename window: {text}"), false));
+        let len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
+        cursor = Some((len.min(cols.saturating_sub(1) as usize) as u16, rows - 1));
+    } else {
+        let title = if status.greek { " [βαρβηλώ] " } else { " [barbelo] " };
+        segments.push(segment(title.into(), false));
+        for (i, window) in app.windows.iter().enumerate() {
+            let active = i == app.active;
+            let flag = if active { "*" } else { " " };
+            let name = window.name(&app.config.windows.name);
+            segments.push(segment(format!("{}:{name}{flag} ", i + 1), active));
+        }
     }
 
     let right = match (&app.message, app.prefix_pending, app.copy_position()) {
+        _ if app.rename.is_some() => String::new(),
         (Some(msg), _, _) => format!(" {msg} "),
         (None, true, _) => " PREFIX ".to_string(),
         (None, false, Some((line, total))) => format!(" {line}/{total} "),
@@ -376,5 +390,6 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<()> {
             Print(text)
         )?;
     }
-    queue!(out, SetAttribute(Attribute::Reset))
+    queue!(out, SetAttribute(Attribute::Reset))?;
+    Ok(cursor)
 }

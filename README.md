@@ -22,6 +22,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` ←↑↓→ `` / `` ` hjkl `` | Move focus between panes    |
 | `` ` o ``       | Focus next pane                         |
 | `` ` ; `` / `` ` : `` | Jump back to the last active pane |
+| `` ` , ``       | Rename the window (empty name: back to automatic) |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |

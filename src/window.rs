@@ -12,6 +12,8 @@ pub struct Window {
     pub active: PaneId,
     /// Previously active pane, for jumping back.
     last: Option<PaneId>,
+    /// Name given by the user, shown instead of the automatic one.
+    pub custom_name: Option<String>,
 }
 
 impl Window {
@@ -22,6 +24,7 @@ impl Window {
             panes: HashMap::from([(id, pane)]),
             active: id,
             last: None,
+            custom_name: None,
         })
     }
 
@@ -110,9 +113,13 @@ impl Window {
         }
     }
 
-    /// `format` filled in from the active pane: `{process}` is the foreground process, `{dir}` the
+    /// The custom name if there is one, otherwise `format` filled in from
+    /// the active pane: `{process}` is the foreground process, `{dir}` the
     /// name of its working directory and `{path}` the whole directory.
     pub fn name(&self, format: &str) -> String {
+        if let Some(name) = &self.custom_name {
+            return name.clone();
+        }
         let Some(pane) = self.panes.get(&self.active) else {
             return "shell".into();
         };
