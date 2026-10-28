@@ -473,6 +473,8 @@ impl App {
             }
             KeyCode::Char('s') => self.start_screensaver(),
             KeyCode::Char('r') => self.start_resize(),
+            KeyCode::Char('<') => self.move_window(-1),
+            KeyCode::Char('>') => self.move_window(1),
             KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
@@ -492,6 +494,15 @@ impl App {
         self.windows.push(window);
         self.active = self.windows.len() - 1;
         Ok(())
+    }
+
+    /// Swaps the active window with its neighbour, `offset` places away.
+    fn move_window(&mut self, offset: isize) {
+        let Some(to) = self.active.checked_add_signed(offset).filter(|&i| i < self.windows.len()) else {
+            return;
+        };
+        self.windows.swap(self.active, to);
+        self.active = to;
     }
 
     fn split(&mut self, split: Split) -> Result<()> {

@@ -25,6 +25,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` z ``       | Zoom the active pane to fill the window, or unzoom |
 | `` ` r ``       | Resize mode: move the borders between panes |
 | `` ` , ``       | Rename the window (empty name: back to automatic) |
+| `` ` < `` / `` ` > `` | Move the window left / right in the status bar |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |
