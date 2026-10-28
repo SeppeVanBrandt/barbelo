@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::num::NonZeroU16;
+use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -115,12 +116,12 @@ impl Pane {
     }
 
     /// Labels the strings in view with hints. Returns `false` if there are none.
-    pub fn enter_hint_mode(&mut self) -> bool {
+    pub fn enter_hint_mode(&mut self, alphabet: &[u8]) -> bool {
         let lines = match &self.copy {
             Some(copy) => copy.visible_lines(),
             None => copy::visible_lines(self.parser.lock().unwrap().screen()),
         };
-        let hints = HintMode::new(lines);
+        let hints = HintMode::new(lines, alphabet);
         if hints.matches.is_empty() {
             return false;
         }
@@ -152,6 +153,12 @@ impl Pane {
         let pid = self.master.process_group_leader()?;
         let comm = std::fs::read_to_string(format!("/proc/{pid}/comm")).ok()?;
         Some(comm.trim().to_string())
+    }
+
+    /// Working directory of the process in the foreground of this pane.
+    pub fn cwd(&self) -> Option<PathBuf> {
+        let pid = self.master.process_group_leader()?;
+        std::fs::read_link(format!("/proc/{pid}/cwd")).ok()
     }
 }
 

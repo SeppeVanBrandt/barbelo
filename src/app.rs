@@ -5,9 +5,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 use crate::clipboard;
+use crate::config::Config;
 use crate::copy::{Action, Mode};
 use crate::hints;
 use crate::keys;
@@ -24,19 +25,6 @@ pub enum AppEvent {
     Input(Event),
     PaneOutput,
     PaneExited(PaneId),
-}
-
-pub struct Config {
-    /// Key that starts a command sequence.
-    pub prefix: KeyEvent,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            prefix: KeyEvent::new(KeyCode::Char('`'), KeyModifiers::NONE),
-        }
-    }
 }
 
 pub struct App {
@@ -204,12 +192,13 @@ impl App {
 
     fn handle_key(&mut self, key: KeyEvent) {
         self.message = None;
+        let prefix = self.config.prefix.0;
         if self.prefix_pending {
             self.prefix_pending = false;
             if let Err(e) = self.command(key) {
                 self.message = Some(e.to_string());
             }
-        } else if key.code == self.config.prefix.code && key.modifiers == self.config.prefix.modifiers {
+        } else if key.code == prefix.code && key.modifiers == prefix.modifiers {
             self.prefix_pending = true;
         } else if let Some(hints) = &mut self.active_window_mut().active_pane().hints {
             let action = hints.handle_key(key);
@@ -275,7 +264,7 @@ impl App {
     fn command(&mut self, key: KeyEvent) -> Result<()> {
         let area = self.pane_area();
         match key.code {
-            _ if key.code == self.config.prefix.code => self.send_key(self.config.prefix),
+            _ if key.code == self.config.prefix.0.code => self.send_key(self.config.prefix.0),
             KeyCode::Char('c') => self.new_window()?,
             KeyCode::Char('n') => self.active = (self.active + 1) % self.windows.len(),
             KeyCode::Char('p') => {
@@ -303,7 +292,8 @@ impl App {
             KeyCode::Char('&') => self.close_window(self.active),
             KeyCode::Char('[') | KeyCode::Esc => self.active_window_mut().active_pane().enter_copy_mode(),
             KeyCode::Char('f') => {
-                if !self.active_window_mut().active_pane().enter_hint_mode() {
+                let pane = self.windows[self.active].active_pane();
+                if !pane.enter_hint_mode(&self.config.hints.alphabet.0) {
                     self.message = Some("nothing to copy".into());
                 }
             }

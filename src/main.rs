@@ -1,5 +1,6 @@
 mod app;
 mod clipboard;
+mod config;
 mod copy;
 mod hints;
 mod keys;
@@ -19,13 +20,16 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use app::{App, Config};
+use app::App;
 use queries::TerminalColors;
 
 fn main() -> Result<()> {
     if std::env::var_os("BARBELO").is_some() {
         anyhow::bail!("already running inside barbelo");
     }
+
+    // Read the config before taking over the terminal, so errors show up.
+    let config = config::load()?;
 
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -37,7 +41,7 @@ fn main() -> Result<()> {
     execute!(io::stdout(), EnterAlternateScreen, EnableBracketedPaste)?;
 
     let colors = TerminalColors::query();
-    let result = App::new(Config::default(), colors).and_then(|(app, rx)| app.run(rx));
+    let result = App::new(config, colors).and_then(|(app, rx)| app.run(rx));
 
     restore_terminal();
     result

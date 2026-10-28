@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 
 use anyhow::Result;
 
@@ -109,11 +110,26 @@ impl Window {
         }
     }
 
-    pub fn name(&self) -> String {
-        self.panes
-            .get(&self.active)
-            .and_then(Pane::process_name)
-            .unwrap_or_else(|| "shell".into())
+    /// `format` filled in from the active pane: `{process}` is the foreground process, `{dir}` the
+    /// name of its working directory and `{path}` the whole directory.
+    pub fn name(&self, format: &str) -> String {
+        let Some(pane) = self.panes.get(&self.active) else {
+            return "shell".into();
+        };
+        let mut name = format.to_string();
+        if name.contains("{process}") {
+            let process = pane.process_name().unwrap_or_else(|| "shell".into());
+            name = name.replace("{process}", &process);
+        }
+        if name.contains("{dir}") || name.contains("{path}") {
+            let cwd = pane.cwd().unwrap_or_default();
+            let dir = match cwd.file_name() {
+                Some(dir) => dir.to_string_lossy().into_owned(),
+                None => cwd.to_string_lossy().into_owned(),
+            };
+            name = name.replace("{dir}", &dir).replace("{path}", &home_relative(&cwd));
+        }
+        name
     }
 
     /// Applies `f` to the tree; returns `true` if the tree became empty.
@@ -127,4 +143,18 @@ impl Window {
             None => true,
         }
     }
+}
+
+/// `path` with the home directory shortened to `~`.
+fn home_relative(path: &Path) -> String {
+    if let Some(home) = std::env::var_os("HOME")
+        && let Ok(rest) = path.strip_prefix(&home)
+    {
+        return if rest.as_os_str().is_empty() {
+            "~".into()
+        } else {
+            format!("~/{}", rest.display())
+        };
+    }
+    path.display().to_string()
 }

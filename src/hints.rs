@@ -9,9 +9,6 @@ use regex::Regex;
 
 use crate::copy::Line;
 
-/// Hint characters, easiest to reach first.
-const ALPHABET: &[u8] = b"asdfqwerzxcvjklmiuopghtybn";
-
 /// Patterns in priority order: when matches overlap, the earlier pattern
 /// wins. A capture group named `m` narrows the match to that group.
 static PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -73,9 +70,10 @@ pub struct HintMode {
 }
 
 impl HintMode {
-    pub fn new(lines: Vec<Line>) -> Self {
+    /// Labels the matches in `lines` with hints made from `alphabet`.
+    pub fn new(lines: Vec<Line>, alphabet: &[u8]) -> Self {
         let mut matches = find_matches(&lines);
-        assign_hints(&mut matches);
+        assign_hints(&mut matches, alphabet);
         let mut grid = HashMap::new();
         for (i, m) in matches.iter().enumerate() {
             for (k, cell) in m.cells.iter().enumerate() {
@@ -206,14 +204,14 @@ fn trim_trailing(s: &str) -> &str {
 
 /// Gives every distinct text a hint. Matches nearest the bottom of the screen
 /// get the shortest hints, and identical texts share one.
-fn assign_hints(matches: &mut [Match]) {
+fn assign_hints(matches: &mut [Match], alphabet: &[u8]) {
     let mut texts: Vec<&str> = Vec::new();
     for m in matches.iter().rev() {
         if !texts.contains(&m.text.as_str()) {
             texts.push(&m.text);
         }
     }
-    let hints = generate_hints(texts.len());
+    let hints = generate_hints(texts.len(), alphabet);
     let by_text: HashMap<String, String> = texts
         .into_iter()
         .zip(hints)
@@ -226,13 +224,13 @@ fn assign_hints(matches: &mut [Match]) {
 
 /// Prefix-free hints: single letters first, then two-letter hints starting
 /// with letters taken off the end of the alphabet.
-fn generate_hints(n: usize) -> Vec<String> {
-    let len = ALPHABET.len();
+fn generate_hints(n: usize, alphabet: &[u8]) -> Vec<String> {
+    let len = alphabet.len();
     let prefixes = if n <= len { 0 } else { (n - len).div_ceil(len - 1).min(len) };
-    let singles = &ALPHABET[..len - prefixes];
+    let singles = &alphabet[..len - prefixes];
     let mut hints: Vec<String> = singles.iter().map(|&c| (c as char).to_string()).collect();
-    for &p in &ALPHABET[len - prefixes..] {
-        for &c in ALPHABET {
+    for &p in &alphabet[len - prefixes..] {
+        for &c in alphabet {
             hints.push(format!("{}{}", p as char, c as char));
         }
     }
@@ -244,6 +242,8 @@ fn generate_hints(n: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::copy::Cell;
+
+    const ALPHABET: &[u8] = b"asdfqwerzxcvjklmiuopghtybn";
 
     fn lines(rows: &[&str], cols: usize) -> Vec<Line> {
         rows.iter()
@@ -276,7 +276,7 @@ mod tests {
     }
 
     fn texts(rows: &[&str]) -> Vec<String> {
-        HintMode::new(lines(rows, 80)).matches.into_iter().map(|m| m.text).collect()
+        HintMode::new(lines(rows, 80), ALPHABET).matches.into_iter().map(|m| m.text).collect()
     }
 
     #[test]
@@ -298,7 +298,7 @@ mod tests {
 
     #[test]
     fn joins_soft_wrapped_rows() {
-        let mode = HintMode::new(lines(&["go to https://exa", "mple.com now"], 17));
+        let mode = HintMode::new(lines(&["go to https://exa", "mple.com now"], 17), ALPHABET);
         assert_eq!(mode.matches.len(), 1);
         assert_eq!(mode.matches[0].text, "https://example.com");
         assert_eq!(mode.matches[0].cells.last(), Some(&(1, 7)));
@@ -306,14 +306,15 @@ mod tests {
 
     #[test]
     fn hints_are_prefix_free_and_shared() {
-        let hints = generate_hints(60);
+        let hints = generate_hints(60, ALPHABET);
         assert_eq!(hints.len(), 60);
         for a in &hints {
             for b in &hints {
                 assert!(a == b || !b.starts_with(a.as_str()), "{a} is a prefix of {b}");
             }
         }
-        let mode = HintMode::new(lines(&["/tmp/a /tmp/b", "/tmp/a"], 80));
+        assert_eq!(generate_hints(3, b"jk"), ["j", "kj", "kk"]);
+        let mode = HintMode::new(lines(&["/tmp/a /tmp/b", "/tmp/a"], 80), ALPHABET);
         let hints: Vec<&str> = mode.matches.iter().map(|m| m.hint.as_str()).collect();
         // The bottom match gets the first hint; duplicates share it.
         assert_eq!(hints, ["a", "s", "a"]);
@@ -321,7 +322,7 @@ mod tests {
 
     #[test]
     fn typing_a_hint_copies() {
-        let mut mode = HintMode::new(lines(&["/tmp/a /tmp/b"], 80));
+        let mut mode = HintMode::new(lines(&["/tmp/a /tmp/b"], 80), ALPHABET);
         let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
         assert!(matches!(mode.handle_key(key('S')), Action::CopyAndPaste(t) if t == "/tmp/a"));
         assert!(matches!(mode.handle_key(key('z')), Action::None));

@@ -8,7 +8,8 @@ cargo run --release
 
 ## Key bindings
 
-All commands start with the prefix key, `` ` `` (backtick).
+All commands start with the prefix key, `` ` `` (backtick) unless
+[configured](#configuration) otherwise.
 
 | Keys            | Action                                  |
 |-----------------|-----------------------------------------|
@@ -76,3 +77,47 @@ All normal-mode motions extend the selection, plus:
 | `y` / Enter    | Copy the selection, back to normal mode |
 | `o`            | Jump to the other end of the selection  |
 | `Esc`          | Cancel, back to normal mode             |
+
+## Configuration
+
+barbelo reads `~/.config/barbelo/config.toml` (or
+`$XDG_CONFIG_HOME/barbelo/config.toml`) at startup. Every setting is optional;
+these are the defaults:
+
+```toml
+prefix = "`"                # a single key, or with Ctrl/Alt: "C-a", "M-a"
+
+[status]
+show_insert = true          # false hides the INSERT label
+color_by_mode = false       # true paints the whole bar in the mode's colors
+greek = false               # true shows βαρβηλώ instead of barbelo
+
+[colors]
+status_fg = "black"
+status_bg = "green"
+# insert_fg / insert_bg     # default to the status colors
+normal_fg = "white"
+normal_bg = "blue"
+visual_fg = "white"
+visual_bg = "magenta"
+hints_fg = "black"
+hints_bg = "yellow"
+active_border = "green"
+inactive_border = "dark-grey"
+
+[hints]
+alphabet = "asdfqwerzxcvjklmiuopghtybn"   # label letters, easiest first
+label_fg = "black"
+label_bg = "yellow"
+match_fg = "yellow"
+dim_fg = "dark-grey"
+
+[windows]
+name = "{process}"          # also {dir} (directory name) and {path} (full directory)
+```
+
+Colors are `#rrggbb`, a 256-color index such as `208`, `default`, or a name:
+`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`,
+`grey`, and `dark-red`, `dark-green`, `dark-yellow`, `dark-blue`,
+`dark-magenta`, `dark-cyan`, `dark-grey`. `red` through `white` are the
+bright variants (ANSI 9–15); the `dark-` ones are the regular colors.
