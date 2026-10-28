@@ -22,6 +22,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` ←↑↓→ `` / `` ` hjkl `` | Move focus between panes    |
 | `` ` o ``       | Focus next pane                         |
 | `` ` ; `` / `` ` : `` | Jump back to the last active pane |
+| `` ` z ``       | Zoom the active pane to fill the window, or unzoom |
 | `` ` , ``       | Rename the window (empty name: back to automatic) |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
@@ -29,6 +30,9 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` f ``       | Hint mode: copy text by typing its label |
 | `` ` ] ``       | Paste the last copied text              |
 | `` ` q ``       | Quit                                    |
+
+A zoomed window is marked `Z` in the status bar. Moving focus, splitting or
+closing a pane unzooms it.
 
 ## Modes
 

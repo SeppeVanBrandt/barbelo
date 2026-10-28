@@ -14,6 +14,8 @@ pub struct Window {
     last: Option<PaneId>,
     /// Name given by the user, shown instead of the automatic one.
     pub custom_name: Option<String>,
+    /// Whether the active pane fills the whole window.
+    pub zoomed: bool,
 }
 
 impl Window {
@@ -25,11 +27,33 @@ impl Window {
             active: id,
             last: None,
             custom_name: None,
+            zoomed: false,
         })
     }
 
     pub fn layout(&self, area: Rect) -> Layout {
+        if self.zoomed {
+            return Layout {
+                panes: vec![(self.active, area)],
+                borders: Vec::new(),
+            };
+        }
         self.root.layout(area)
+    }
+
+    /// Zooms the active pane to fill the window, or back again.
+    pub fn toggle_zoom(&mut self, area: Rect) {
+        if self.zoomed || self.panes.len() > 1 {
+            self.zoomed = !self.zoomed;
+            self.resize(area);
+        }
+    }
+
+    fn unzoom(&mut self, area: Rect) {
+        if self.zoomed {
+            self.zoomed = false;
+            self.resize(area);
+        }
     }
 
     pub fn active_pane(&mut self) -> &mut Pane {
@@ -37,6 +61,7 @@ impl Window {
     }
 
     pub fn split(&mut self, id: PaneId, split: Split, area: Rect, ctx: PaneContext) -> Result<()> {
+        self.unzoom(area);
         self.root.split(self.active, id, split);
         let rect = self.layout(area).rect_of(id).expect("new pane in layout");
         match Pane::spawn(id, rect.h, rect.w, ctx) {
@@ -60,6 +85,7 @@ impl Window {
         if empty {
             return true;
         }
+        self.zoomed = false;
         if self.last == Some(id) {
             self.last = None;
         }
@@ -79,6 +105,7 @@ impl Window {
     }
 
     pub fn focus(&mut self, dir: Direction, area: Rect) {
+        self.unzoom(area);
         let layout = self.layout(area);
         let Some(rect) = layout.rect_of(self.active) else {
             return;
@@ -94,14 +121,16 @@ impl Window {
     }
 
     pub fn focus_next(&mut self, area: Rect) {
+        self.unzoom(area);
         let ids: Vec<PaneId> = self.layout(area).panes.iter().map(|(id, _)| *id).collect();
         if let Some(pos) = ids.iter().position(|id| *id == self.active) {
             self.set_active(ids[(pos + 1) % ids.len()]);
         }
     }
 
-    pub fn focus_last(&mut self) {
+    pub fn focus_last(&mut self, area: Rect) {
         if let Some(id) = self.last.filter(|id| self.panes.contains_key(id)) {
+            self.unzoom(area);
             self.set_active(id);
         }
     }

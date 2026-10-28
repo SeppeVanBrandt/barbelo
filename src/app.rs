@@ -313,7 +313,8 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => self.active_window_mut().focus(Direction::Up, area),
             KeyCode::Down | KeyCode::Char('j') => self.active_window_mut().focus(Direction::Down, area),
             KeyCode::Char('o') => self.active_window_mut().focus_next(area),
-            KeyCode::Char(';' | ':') => self.active_window_mut().focus_last(),
+            KeyCode::Char(';' | ':') => self.active_window_mut().focus_last(area),
+            KeyCode::Char('z') => self.active_window_mut().toggle_zoom(area),
             KeyCode::Char(',') => {
                 self.rename = Some(self.active_window().custom_name.clone().unwrap_or_default())
             }

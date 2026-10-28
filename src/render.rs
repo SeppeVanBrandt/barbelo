@@ -357,9 +357,14 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         segments.push(segment(title.into(), false));
         for (i, window) in app.windows.iter().enumerate() {
             let active = i == app.active;
-            let flag = if active { "*" } else { " " };
+            let flags = match (active, window.zoomed) {
+                (true, true) => "*Z",
+                (true, false) => "*",
+                (false, true) => "Z",
+                (false, false) => " ",
+            };
             let name = window.name(&app.config.windows.name);
-            segments.push(segment(format!("{}:{name}{flag} ", i + 1), active));
+            segments.push(segment(format!("{}:{name}{flags} ", i + 1), active));
         }
     }
 
