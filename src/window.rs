@@ -147,11 +147,39 @@ impl Window {
     /// the active pane: `{process}` is the foreground process, `{dir}` the
     /// name of its working directory and `{path}` the whole directory.
     pub fn name(&self, format: &str) -> String {
-        if let Some(name) = &self.custom_name {
-            return name.clone();
+        match &self.custom_name {
+            Some(name) => name.clone(),
+            None => self.fill_pane_fields(format),
         }
+    }
+
+    /// The window's entry in the status bar: `format` with `{number}`,
+    /// `{name}` (see [`Window::name`], using `name_format`), `{flags}` and
+    /// the active pane's `{process}`, `{dir}` and `{path}` filled in.
+    pub fn status_entry(&self, format: &str, name_format: &str, number: usize, active: bool) -> String {
+        // Never empty, so entries keep their width when another window
+        // becomes active.
+        let flags = match (active, self.zoomed) {
+            (true, true) => "*Z",
+            (true, false) => "*",
+            (false, true) => "Z",
+            (false, false) => " ",
+        };
+        let entry = self
+            .fill_pane_fields(format)
+            .replace("{number}", &number.to_string())
+            .replace("{flags}", flags);
+        if entry.contains("{name}") {
+            entry.replace("{name}", &self.name(name_format))
+        } else {
+            entry
+        }
+    }
+
+    /// Fills in `{process}`, `{dir}` and `{path}` from the active pane.
+    fn fill_pane_fields(&self, format: &str) -> String {
         let Some(pane) = self.panes.get(&self.active) else {
-            return "shell".into();
+            return format.replace("{process}", "shell");
         };
         let mut name = format.to_string();
         if name.contains("{process}") {

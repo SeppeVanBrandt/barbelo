@@ -99,6 +99,8 @@ color_by_mode = false       # true paints the whole bar in the mode's colors
 greek = false               # true shows βαρβηλώ instead of barbelo
 clock = false               # true shows the time at the right end of the bar
 clock_format = "%H:%M"      # strftime codes, e.g. "%a %d %b %H:%M:%S"
+window_format = "{number}:{name}{flags} "   # each window's entry, see below
+# active_window_format      # the active window's entry; defaults to window_format
 
 [colors]
 status_fg = "black"
@@ -112,6 +114,8 @@ hints_fg = "black"
 hints_bg = "yellow"
 active_border = "green"
 inactive_border = "dark-grey"
+# window_fg / window_bg                 # window entries; default to the bar colors
+# active_window_fg / active_window_bg   # the active window's entry
 
 [hints]
 alphabet = "asdfqwerzxcvjklmiuopghtybn"   # label letters, easiest first
@@ -126,6 +130,20 @@ borders = "shared"          # or "boxed": a frame around every pane
 border_chars = "light"      # light, heavy, double, rounded, block or solid
 # active_border_chars       # for the active pane; defaults to border_chars
 ```
+
+Window entries in the status bar can use these placeholders:
+
+| Placeholder | Value |
+|-------------|-------|
+| `{number}`  | Window number, from 1 |
+| `{name}`    | The name given with `` ` , ``, or else `windows.name` filled in |
+| `{flags}`   | `*` for the active window, `Z` when zoomed, otherwise a space |
+| `{process}` | Foreground process of the active pane |
+| `{dir}`     | Name of that process's working directory |
+| `{path}`    | The whole working directory, with `~` for home |
+
+For example `window_format = " {number}:{dir}:{process} "` gives
+` 2:barbelo:nvim `. `windows.name` can use `{process}`, `{dir}` and `{path}`.
 
 Colors are `#rrggbb`, a 256-color index such as `208`, `default`, or a name:
 `black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`,

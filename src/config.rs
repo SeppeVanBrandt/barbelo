@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result, bail};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::Color;
+use regex::Regex;
 use serde::Deserialize;
 
 use crate::layout::{BorderChars, BorderStyle};
@@ -35,6 +36,16 @@ pub struct StatusConfig {
     pub clock: bool,
     /// `strftime` format of the clock.
     pub clock_format: String,
+    /// A window's entry in the bar; see `Window::status_entry`.
+    pub window_format: String,
+    /// The active window's entry; `window_format` unless set.
+    pub active_window_format: Option<String>,
+}
+
+impl StatusConfig {
+    pub fn active_window_format(&self) -> &str {
+        self.active_window_format.as_deref().unwrap_or(&self.window_format)
+    }
 }
 
 impl Default for StatusConfig {
@@ -45,6 +56,8 @@ impl Default for StatusConfig {
             greek: false,
             clock: false,
             clock_format: "%H:%M".into(),
+            window_format: "{number}:{name}{flags} ".into(),
+            active_window_format: None,
         }
     }
 }
@@ -65,6 +78,11 @@ pub struct Colors {
     pub hints_bg: ConfigColor,
     pub active_border: ConfigColor,
     pub inactive_border: ConfigColor,
+    /// Window entries in the bar; the bar's colors unless set.
+    pub window_fg: Option<ConfigColor>,
+    pub window_bg: Option<ConfigColor>,
+    pub active_window_fg: Option<ConfigColor>,
+    pub active_window_bg: Option<ConfigColor>,
 }
 
 impl Default for Colors {
@@ -82,6 +100,10 @@ impl Default for Colors {
             hints_bg: ConfigColor(Color::Yellow),
             active_border: ConfigColor(Color::Green),
             inactive_border: ConfigColor(Color::DarkGrey),
+            window_fg: None,
+            window_bg: None,
+            active_window_fg: None,
+            active_window_bg: None,
         }
     }
 }
@@ -308,9 +330,45 @@ pub fn load() -> Result<Config> {
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Config::default()),
         Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
     };
-    match toml::from_str(&text) {
+    match parse(&text) {
         Ok(config) => Ok(config),
         Err(e) => bail!("invalid config {}:\n{e}", path.display()),
+    }
+}
+
+fn parse(text: &str) -> Result<Config, String> {
+    let config: Config = toml::from_str(text).map_err(|e| e.to_string())?;
+    config.check_formats()?;
+    Ok(config)
+}
+
+impl Config {
+    /// Rejects placeholders the formats don't know, which are most likely
+    /// typos.
+    fn check_formats(&self) -> Result<(), String> {
+        const PANE: &[&str] = &["process", "dir", "path"];
+        const ENTRY: &[&str] = &["process", "dir", "path", "number", "name", "flags"];
+        let status = &self.status;
+        let formats = [
+            ("windows.name", Some(&self.windows.name), PANE),
+            ("status.window_format", Some(&status.window_format), ENTRY),
+            ("status.active_window_format", status.active_window_format.as_ref(), ENTRY),
+        ];
+        let placeholder = Regex::new(r"\{(\w*)\}").expect("valid regex");
+        for (setting, format, known) in formats {
+            let Some(format) = format else { continue };
+            for caps in placeholder.captures_iter(format) {
+                if !known.contains(&&caps[1]) {
+                    let known: Vec<String> = known.iter().map(|k| format!("{{{k}}}")).collect();
+                    return Err(format!(
+                        "unknown {} in {setting}; use {}",
+                        &caps[0],
+                        known.join(", ")
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -318,9 +376,6 @@ pub fn load() -> Result<Config> {
 mod tests {
     use super::*;
 
-    fn parse(text: &str) -> Result<Config, String> {
-        toml::from_str(text).map_err(|e| e.to_string())
-    }
 
     #[test]
     fn empty_config_is_default() {
@@ -372,5 +427,8 @@ mod tests {
         assert!(parse("[hints]\nalphabet = \"aB\"").is_err());
         assert!(parse("[status]\nshow_inserts = false").is_err());
         assert!(parse("[windows]\nborders = \"double\"").is_err());
+        assert!(parse("[windows]\nname = \"{number}\"").is_err());
+        assert!(parse("[status]\nwindow_format = \"{nmber}:{name}\"").is_err());
+        assert!(parse("[status]\nactive_window_format = \"{number}:{dir}:{process}\"").is_ok());
     }
 }
