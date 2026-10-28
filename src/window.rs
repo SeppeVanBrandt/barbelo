@@ -3,7 +3,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::layout::{Direction, Layout, Node, Rect, Split, neighbor};
+use crate::layout::{BorderStyle, Direction, Layout, Node, Rect, Split, neighbor};
 use crate::pane::{Pane, PaneContext, PaneId};
 
 pub struct Window {
@@ -16,29 +16,30 @@ pub struct Window {
     pub custom_name: Option<String>,
     /// Whether the active pane fills the whole window.
     pub zoomed: bool,
+    border_style: BorderStyle,
 }
 
 impl Window {
-    pub fn new(id: PaneId, area: Rect, ctx: PaneContext) -> Result<Self> {
-        let pane = Pane::spawn(id, area.h, area.w, ctx)?;
+    pub fn new(id: PaneId, area: Rect, border_style: BorderStyle, ctx: PaneContext) -> Result<Self> {
+        let root = Node::Leaf(id);
+        let rect = root.layout(area, border_style).panes[0].1;
+        let pane = Pane::spawn(id, rect.h, rect.w, ctx)?;
         Ok(Self {
-            root: Node::Leaf(id),
+            root,
             panes: HashMap::from([(id, pane)]),
             active: id,
             last: None,
             custom_name: None,
             zoomed: false,
+            border_style,
         })
     }
 
     pub fn layout(&self, area: Rect) -> Layout {
         if self.zoomed {
-            return Layout {
-                panes: vec![(self.active, area)],
-                borders: Vec::new(),
-            };
+            return Node::Leaf(self.active).layout(area, self.border_style);
         }
-        self.root.layout(area)
+        self.root.layout(area, self.border_style)
     }
 
     /// Zooms the active pane to fill the window, or back again.

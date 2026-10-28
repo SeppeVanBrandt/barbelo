@@ -1,3 +1,5 @@
+use serde::Deserialize;
+
 use crate::pane::PaneId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -16,6 +18,27 @@ impl Rect {
     pub fn bottom(&self) -> u16 {
         self.y + self.h
     }
+
+    /// The rect shrunk by one cell on every side.
+    fn inset(&self) -> Rect {
+        Rect {
+            x: self.x + 1,
+            y: self.y + 1,
+            w: self.w.saturating_sub(2),
+            h: self.h.saturating_sub(2),
+        }
+    }
+}
+
+/// How panes are separated.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BorderStyle {
+    /// One line between neighbouring panes, shared by both.
+    #[default]
+    Shared,
+    /// A box around every pane; neighbours' boxes touch.
+    Boxed,
 }
 
 /// How a split arranges its two children.
@@ -53,10 +76,13 @@ pub enum Border {
     Horizontal { x: u16, y: u16, len: u16 },
 }
 
-#[derive(Default)]
 pub struct Layout {
     pub panes: Vec<(PaneId, Rect)>,
     pub borders: Vec<Border>,
+    /// Box around each pane, with boxed borders.
+    pub frames: Vec<(PaneId, Rect)>,
+    /// Cells between the contents of two neighbouring panes.
+    pub gap: u16,
 }
 
 impl Layout {
@@ -66,13 +92,29 @@ impl Layout {
 }
 
 impl Node {
-    pub fn layout(&self, area: Rect) -> Layout {
-        let mut out = Layout::default();
-        self.layout_into(area, &mut out);
+    pub fn layout(&self, area: Rect, style: BorderStyle) -> Layout {
+        let mut out = Layout {
+            panes: Vec::new(),
+            borders: Vec::new(),
+            frames: Vec::new(),
+            gap: 1,
+        };
+        match style {
+            BorderStyle::Shared => self.layout_into(area, &mut out, true),
+            BorderStyle::Boxed => {
+                // Split without separators, then draw a box inside each part.
+                self.layout_into(area, &mut out, false);
+                out.gap = 2;
+                for (id, rect) in &mut out.panes {
+                    out.frames.push((*id, *rect));
+                    *rect = rect.inset();
+                }
+            }
+        }
         out
     }
 
-    fn layout_into(&self, area: Rect, out: &mut Layout) {
+    fn layout_into(&self, area: Rect, out: &mut Layout, separators: bool) {
         match self {
             Node::Leaf(id) => out.panes.push((*id, area)),
             Node::Split {
@@ -80,10 +122,12 @@ impl Node {
                 first,
                 second,
             } => {
-                let (a, b, border) = split_rect(area, *split);
-                first.layout_into(a, out);
-                second.layout_into(b, out);
-                out.borders.push(border);
+                let (a, b, border) = split_rect(area, *split, separators);
+                first.layout_into(a, out, separators);
+                second.layout_into(b, out, separators);
+                if separators {
+                    out.borders.push(border);
+                }
             }
         }
     }
@@ -136,15 +180,18 @@ impl Node {
     }
 }
 
-fn split_rect(area: Rect, split: Split) -> (Rect, Rect, Border) {
+/// Divides `area` in two, leaving a column or row for the border between
+/// them if `separator` is set.
+fn split_rect(area: Rect, split: Split, separator: bool) -> (Rect, Rect, Border) {
+    let gap = u16::from(separator);
     match split {
         Split::Horizontal => {
-            let avail = area.w.saturating_sub(1);
+            let avail = area.w.saturating_sub(gap);
             let w1 = avail.div_ceil(2);
             let w2 = avail - w1;
             let a = Rect { w: w1, ..area };
             let b = Rect {
-                x: area.x + w1 + 1,
+                x: area.x + w1 + gap,
                 w: w2,
                 ..area
             };
@@ -156,12 +203,12 @@ fn split_rect(area: Rect, split: Split) -> (Rect, Rect, Border) {
             (a, b, border)
         }
         Split::Vertical => {
-            let avail = area.h.saturating_sub(1);
+            let avail = area.h.saturating_sub(gap);
             let h1 = avail.div_ceil(2);
             let h2 = avail - h1;
             let a = Rect { h: h1, ..area };
             let b = Rect {
-                y: area.y + h1 + 1,
+                y: area.y + h1 + gap,
                 h: h2,
                 ..area
             };
@@ -179,6 +226,7 @@ fn split_rect(area: Rect, split: Split) -> (Rect, Rect, Border) {
 /// border it, the one overlapping `hint` (a row or column inside `from`) wins.
 pub fn neighbor(layout: &Layout, from: PaneId, dir: Direction, hint: u16) -> Option<PaneId> {
     let a = layout.rect_of(from)?;
+    let gap = layout.gap;
     let overlap = |lo1: u16, hi1: u16, lo2: u16, hi2: u16| lo1 < hi2 && lo2 < hi1;
     let candidates: Vec<(PaneId, Rect)> = layout
         .panes
@@ -187,10 +235,10 @@ pub fn neighbor(layout: &Layout, from: PaneId, dir: Direction, hint: u16) -> Opt
         .filter(|(id, r)| {
             *id != from
                 && match dir {
-                    Direction::Left => r.right() + 1 == a.x && overlap(r.y, r.bottom(), a.y, a.bottom()),
-                    Direction::Right => a.right() + 1 == r.x && overlap(r.y, r.bottom(), a.y, a.bottom()),
-                    Direction::Up => r.bottom() + 1 == a.y && overlap(r.x, r.right(), a.x, a.right()),
-                    Direction::Down => a.bottom() + 1 == r.y && overlap(r.x, r.right(), a.x, a.right()),
+                    Direction::Left => r.right() + gap == a.x && overlap(r.y, r.bottom(), a.y, a.bottom()),
+                    Direction::Right => a.right() + gap == r.x && overlap(r.y, r.bottom(), a.y, a.bottom()),
+                    Direction::Up => r.bottom() + gap == a.y && overlap(r.x, r.right(), a.x, a.right()),
+                    Direction::Down => a.bottom() + gap == r.y && overlap(r.x, r.right(), a.x, a.right()),
                 }
         })
         .collect();
@@ -221,14 +269,14 @@ mod tests {
         let mut root = Node::Leaf(0);
         assert!(root.split(0, 1, Split::Horizontal));
         assert!(root.split(1, 2, Split::Vertical));
-        let layout = root.layout(AREA);
+        let layout = root.layout(AREA, BorderStyle::Shared);
         assert_eq!(layout.rect_of(0), Some(Rect { x: 0, y: 0, w: 40, h: 24 }));
         assert_eq!(layout.rect_of(1), Some(Rect { x: 41, y: 0, w: 40, h: 12 }));
         assert_eq!(layout.rect_of(2), Some(Rect { x: 41, y: 13, w: 40, h: 11 }));
         assert_eq!(layout.borders.len(), 2);
 
         let root = root.remove(1).unwrap();
-        let layout = root.layout(AREA);
+        let layout = root.layout(AREA, BorderStyle::Shared);
         assert_eq!(layout.rect_of(2), Some(Rect { x: 41, y: 0, w: 40, h: 24 }));
         assert!(root.remove(0).unwrap().remove(2).is_none());
     }
@@ -238,11 +286,27 @@ mod tests {
         let mut root = Node::Leaf(0);
         root.split(0, 1, Split::Horizontal);
         root.split(1, 2, Split::Vertical);
-        let layout = root.layout(AREA);
+        let layout = root.layout(AREA, BorderStyle::Shared);
         assert_eq!(neighbor(&layout, 0, Direction::Right, 20), Some(2));
         assert_eq!(neighbor(&layout, 0, Direction::Right, 3), Some(1));
         assert_eq!(neighbor(&layout, 2, Direction::Up, 50), Some(1));
         assert_eq!(neighbor(&layout, 2, Direction::Left, 15), Some(0));
         assert_eq!(neighbor(&layout, 0, Direction::Left, 0), None);
+    }
+
+    #[test]
+    fn boxed_panes() {
+        let mut root = Node::Leaf(0);
+        root.split(0, 1, Split::Horizontal);
+        root.split(1, 2, Split::Vertical);
+        let layout = root.layout(AREA, BorderStyle::Boxed);
+        assert!(layout.borders.is_empty());
+        assert_eq!(layout.frames[0], (0, Rect { x: 0, y: 0, w: 41, h: 24 }));
+        assert_eq!(layout.rect_of(0), Some(Rect { x: 1, y: 1, w: 39, h: 22 }));
+        assert_eq!(layout.rect_of(1), Some(Rect { x: 42, y: 1, w: 38, h: 10 }));
+        assert_eq!(layout.rect_of(2), Some(Rect { x: 42, y: 13, w: 38, h: 10 }));
+        assert_eq!(neighbor(&layout, 0, Direction::Right, 20), Some(2));
+        assert_eq!(neighbor(&layout, 1, Direction::Down, 50), Some(2));
+        assert_eq!(neighbor(&layout, 2, Direction::Left, 15), Some(0));
     }
 }

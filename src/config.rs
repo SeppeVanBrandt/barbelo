@@ -9,6 +9,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::style::Color;
 use serde::Deserialize;
 
+use crate::layout::BorderStyle;
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
@@ -115,12 +117,15 @@ pub struct WindowsConfig {
     /// How windows are named, with `{process}`, `{dir}` and `{path}` filled
     /// in from the active pane.
     pub name: String,
+    /// `shared` lines between panes, or a `boxed` frame around each pane.
+    pub borders: BorderStyle,
 }
 
 impl Default for WindowsConfig {
     fn default() -> Self {
         Self {
             name: "{process}".into(),
+            borders: BorderStyle::Shared,
         }
     }
 }
@@ -325,6 +330,8 @@ mod tests {
             visual_fg = "dark_grey"
             [hints]
             alphabet = "jkl"
+            [windows]
+            borders = "boxed"
             "##,
         )
         .unwrap();
@@ -337,6 +344,7 @@ mod tests {
         assert_eq!(config.colors.status_fg.0, Color::Black);
         assert_eq!(config.colors.insert().1, config.colors.status_bg);
         assert_eq!(config.hints.alphabet.0, b"jkl");
+        assert_eq!(config.windows.borders, BorderStyle::Boxed);
     }
 
     #[test]
@@ -346,5 +354,6 @@ mod tests {
         assert!(parse("[hints]\nalphabet = \"aa\"").is_err());
         assert!(parse("[hints]\nalphabet = \"aB\"").is_err());
         assert!(parse("[status]\nshow_inserts = false").is_err());
+        assert!(parse("[windows]\nborders = \"double\"").is_err());
     }
 }

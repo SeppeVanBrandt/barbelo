@@ -122,6 +122,7 @@ dim_fg = "dark-grey"
 
 [windows]
 name = "{process}"          # also {dir} (directory name) and {path} (full directory)
+borders = "shared"          # or "boxed": a frame around every pane
 ```
 
 Colors are `#rrggbb`, a 256-color index such as `208`, `default`, or a name:

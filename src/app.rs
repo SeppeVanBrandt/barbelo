@@ -356,7 +356,8 @@ impl App {
 
     fn new_window(&mut self) -> Result<()> {
         let id = self.alloc_pane_id();
-        let window = Window::new(id, self.pane_area(), self.ctx.clone())?;
+        let style = self.config.windows.borders;
+        let window = Window::new(id, self.pane_area(), style, self.ctx.clone())?;
         self.windows.push(window);
         self.active = self.windows.len() - 1;
         Ok(())

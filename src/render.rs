@@ -13,6 +13,7 @@ use crate::config::Config;
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
 use crate::layout::{Border, Rect};
+use crate::pane::PaneId;
 
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     queue!(out, BeginSynchronizedUpdate, Hide)?;
@@ -55,6 +56,7 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
 
     let active_rect = layout.rect_of(window.active);
     draw_borders(out, &layout.borders, area, active_rect, &app.config)?;
+    draw_frames(out, &layout.frames, window.active, &app.config)?;
     let prompt_cursor = draw_status(out, app)?;
     if prompt_cursor.is_some() {
         cursor = prompt_cursor;
@@ -297,6 +299,30 @@ fn draw_borders(
             let fg = if touches_active { colors.active_border } else { colors.inactive_border };
             queue!(out, MoveTo(area.x + x, area.y + y), SetForegroundColor(fg.0), Print(glyph))?;
         }
+    }
+    queue!(out, SetAttribute(Attribute::Reset))
+}
+
+/// Draws a box around each pane, highlighting the active one.
+fn draw_frames(
+    out: &mut impl Write,
+    frames: &[(PaneId, Rect)],
+    active: PaneId,
+    config: &Config,
+) -> io::Result<()> {
+    for &(id, r) in frames {
+        if r.w < 2 || r.h < 2 {
+            continue;
+        }
+        let colors = &config.colors;
+        let fg = if id == active { colors.active_border } else { colors.inactive_border };
+        let line = "─".repeat(r.w as usize - 2);
+        queue!(out, SetForegroundColor(fg.0))?;
+        queue!(out, MoveTo(r.x, r.y), Print(format!("┌{line}┐")))?;
+        for y in r.y + 1..r.bottom() - 1 {
+            queue!(out, MoveTo(r.x, y), Print('│'), MoveTo(r.right() - 1, y), Print('│'))?;
+        }
+        queue!(out, MoveTo(r.x, r.bottom() - 1), Print(format!("└{line}┘")))?;
     }
     queue!(out, SetAttribute(Attribute::Reset))
 }
