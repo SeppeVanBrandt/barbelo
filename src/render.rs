@@ -9,7 +9,7 @@ use crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
 
 use crate::app::App;
 use crate::clock;
-use crate::config::Config;
+use crate::config::{Config, ConfigColor};
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
 use crate::layout::{Border, BorderChars, Rect};
@@ -69,7 +69,13 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
 
     let active_rect = layout.rect_of(window.active);
     draw_borders(out, &layout.borders, area, active_rect, &app.config)?;
-    draw_frames(out, &layout.frames, window.active, &app.config)?;
+    // With the status bar in the border, the active frame takes the mode's
+    // color.
+    let active_color = match app.config.status_in_border() {
+        true => mode_color(app),
+        false => app.config.colors.active_border,
+    };
+    draw_frames(out, &layout.frames, window.active, active_color, &app.config)?;
     let prompt_cursor = draw_status(out, app)?;
     if prompt_cursor.is_some() {
         cursor = prompt_cursor;
@@ -309,7 +315,9 @@ fn draw_borders(
             let touches_active = active.is_some_and(|r| {
                 x + 1 >= r.x && x <= r.right() && y + 1 >= r.y && y <= r.bottom()
             });
-            let glyphs = border_style(config, touches_active, out)?;
+            let colors = &config.colors;
+            let color = if touches_active { colors.active_border } else { colors.inactive_border };
+            let glyphs = border_style(config, touches_active, color, out)?;
             queue!(out, MoveTo(area.x + x, area.y + y), Print(glyphs.lines[glyph]))?;
         }
     }
@@ -348,11 +356,14 @@ fn char_array<const N: usize>(s: &str) -> [char; N] {
     chars.try_into().expect("glyph count")
 }
 
-/// Sets the colors for the active or an inactive border and returns its
-/// characters.
-fn border_style(config: &Config, active: bool, out: &mut impl Write) -> io::Result<Glyphs> {
-    let colors = &config.colors;
-    let color = if active { colors.active_border } else { colors.inactive_border };
+/// Sets the border color and returns the characters for the active or an
+/// inactive border.
+fn border_style(
+    config: &Config,
+    active: bool,
+    color: ConfigColor,
+    out: &mut impl Write,
+) -> io::Result<Glyphs> {
     let chars = config.windows.border_chars(active);
     // Solid borders are blank cells painted in the border color.
     let bg = if chars == BorderChars::Solid { color.0 } else { Color::Reset };
@@ -365,13 +376,15 @@ fn draw_frames(
     out: &mut impl Write,
     frames: &[(PaneId, Rect)],
     active: PaneId,
+    active_color: ConfigColor,
     config: &Config,
 ) -> io::Result<()> {
     for &(id, r) in frames {
         if r.w < 2 || r.h < 2 {
             continue;
         }
-        let [top, bottom, left, right, tl, tr, bl, br] = border_style(config, id == active, out)?.frame;
+        let color = if id == active { active_color } else { config.colors.inactive_border };
+        let [top, bottom, left, right, tl, tr, bl, br] = border_style(config, id == active, color, out)?.frame;
         let inner = r.w as usize - 2;
         let top: String = std::iter::repeat_n(top, inner).collect();
         let bottom: String = std::iter::repeat_n(bottom, inner).collect();
@@ -391,7 +404,20 @@ struct Segment {
     bg: Color,
 }
 
-/// Draws the status bar. Returns where the cursor goes while a window name
+/// The current mode's color: the mode's name is written in it when the
+/// status bar is in the border, and the active pane's frame takes it.
+fn mode_color(app: &App) -> ConfigColor {
+    let colors = &app.config.colors;
+    match app.mode() {
+        _ if app.hinting() => colors.hints_bg,
+        None => colors.active_border,
+        Some(Mode::Normal) => colors.normal_bg,
+        Some(Mode::Visual | Mode::VisualLine) => colors.visual_bg,
+    }
+}
+
+/// Draws the status bar, either as a line of its own or written into the
+/// panes' bottom border. Returns where the cursor goes while a window name
 /// is being typed.
 fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>> {
     let (cols, rows) = app.size;
@@ -400,6 +426,8 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     }
     let colors = &app.config.colors;
     let status = &app.config.status;
+    let in_border = app.config.status_in_border();
+    let plain = ConfigColor(Color::Reset);
 
     // The mode's name takes the place of the title, except in insert mode.
     let title = if status.greek { "[βαρβηλώ]" } else { "[barbelo]" };
@@ -417,7 +445,12 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     // shifts when the mode changes.
     let slot_width = title.chars().count().max("INSERT".len());
     let slot = format!(" {:^slot_width$} ", label.unwrap_or(title));
-    let (bar_fg, bar_bg) = if status.color_by_mode {
+    // In the border, text sits on the terminal's own background, and the
+    // mode's name is written in the mode's color.
+    let (slot_fg, slot_bg) = if in_border { (mode_color(app), plain) } else { (fg, bg) };
+    let (bar_fg, bar_bg) = if in_border {
+        (plain, plain)
+    } else if status.color_by_mode {
         (fg, bg)
     } else {
         (colors.status_fg, colors.status_bg)
@@ -429,16 +462,13 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         bg: bar_bg.0,
     };
 
-    let mut segments = vec![Segment {
-        fg: fg.0,
-        bg: bg.0,
-        ..segment(slot, label.is_some())
+    let mut left = vec![Segment {
+        fg: slot_fg.0,
+        bg: slot_bg.0,
+        ..segment(slot, label.is_some() || in_border)
     }];
-    let mut cursor = None;
     if let Some(text) = &app.rename {
-        segments.push(segment(format!(" rename window: {text}"), false));
-        let len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
-        cursor = Some((len.min(cols.saturating_sub(1) as usize) as u16, rows - 1));
+        left.push(segment(format!(" rename window: {text}"), false));
     } else {
         for (i, window) in app.windows.iter().enumerate() {
             let active = i == app.active;
@@ -447,7 +477,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
                 false => (status.window_format.as_str(), colors.window_fg, colors.window_bg),
             };
             let text = window.status_entry(format, &app.config.windows.name, i + 1);
-            segments.push(Segment {
+            left.push(Segment {
                 fg: fg.unwrap_or(bar_fg).0,
                 bg: bg.unwrap_or(bar_bg).0,
                 ..segment(text, active)
@@ -455,7 +485,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         }
     }
 
-    let right = match (&app.message, app.prefix_pending, app.copy_position()) {
+    let message = match (&app.message, app.prefix_pending, app.copy_position()) {
         _ if app.rename.is_some() => String::new(),
         (Some(msg), _, _) => format!(" {msg} "),
         (None, true, _) => " PREFIX ".to_string(),
@@ -466,15 +496,35 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
         true => format!(" {} ", clock::now(&status.clock_format)),
         false => String::new(),
     };
-    let width = cols as usize;
-    let left_len: usize = segments.iter().map(|s| s.text.chars().count()).sum();
-    let right_len = right.chars().count() + clock.chars().count();
-    let gap = width.saturating_sub(left_len + right_len);
-    segments.push(segment(" ".repeat(gap), false));
-    segments.push(segment(right, true));
-    segments.push(segment(clock, false));
+    let right = [segment(message, true), segment(clock, false)];
 
-    queue!(out, MoveTo(0, rows - 1), SetAttribute(Attribute::Reset))?;
+    // In the border, keep the corners and a piece of the edge at both ends.
+    let (start, end) = if in_border { (2, cols.saturating_sub(2)) } else { (0, cols) };
+    let width = end.saturating_sub(start) as usize;
+    let len = |segments: &[Segment]| segments.iter().map(|s| s.text.chars().count()).sum::<usize>();
+    let right_len = len(&right).min(width);
+    let left_room = width - right_len;
+    let left_len = len(&left).min(left_room);
+    if !in_border {
+        // A bar of its own is filled from end to end; in the border, the
+        // border shows through between the two sides.
+        left.push(segment(" ".repeat(left_room - left_len), false));
+    }
+
+    let y = rows - 1;
+    print_segments(out, start, y, &left, left_room)?;
+    print_segments(out, end - right_len as u16, y, &right, right_len)?;
+    queue!(out, SetAttribute(Attribute::Reset))?;
+    let cursor = app.rename.as_ref().map(|_| {
+        let x = (start as usize + left_len).min(cols.saturating_sub(1) as usize);
+        (x as u16, y)
+    });
+    Ok(cursor)
+}
+
+/// Prints `segments` from (`x`, `y`), cut off after `width` columns.
+fn print_segments(out: &mut impl Write, x: u16, y: u16, segments: &[Segment], width: usize) -> io::Result<()> {
+    queue!(out, MoveTo(x, y), SetAttribute(Attribute::Reset))?;
     let mut remaining = width;
     for segment in segments {
         let text: String = segment.text.chars().take(remaining).collect();
@@ -488,6 +538,5 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
             Print(text)
         )?;
     }
-    queue!(out, SetAttribute(Attribute::Reset))?;
-    Ok(cursor)
+    Ok(())
 }

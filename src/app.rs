@@ -218,11 +218,13 @@ impl App {
     }
 
     pub fn pane_area(&self) -> Rect {
+        // A status bar in the bottom border doesn't need a line of its own.
+        let status_rows = if self.config.status_in_border() { 0 } else { 1 };
         Rect {
             x: 0,
             y: 0,
             w: self.size.0,
-            h: self.size.1.saturating_sub(1),
+            h: self.size.1.saturating_sub(status_rows),
         }
     }
 

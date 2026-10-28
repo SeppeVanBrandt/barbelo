@@ -41,6 +41,9 @@ pub struct StatusConfig {
     pub window_format: String,
     /// The active window's entry; `window_format` unless set.
     pub active_window_format: Option<String>,
+    /// With boxed borders, write the status bar into the panes' bottom
+    /// edge instead of a line of its own.
+    pub in_border: bool,
 }
 
 impl StatusConfig {
@@ -59,6 +62,7 @@ impl Default for StatusConfig {
             clock_format: "%H:%M".into(),
             window_format: "{number}:{name}{flags}".into(),
             active_window_format: None,
+            in_border: true,
         }
     }
 }
@@ -164,6 +168,13 @@ impl Default for WindowsConfig {
             border_chars: BorderChars::Light,
             active_border_chars: None,
         }
+    }
+}
+
+impl Config {
+    /// Whether the status bar is drawn into the panes' bottom border.
+    pub fn status_in_border(&self) -> bool {
+        self.status.in_border && self.windows.borders == BorderStyle::Boxed
     }
 }
 

@@ -110,6 +110,7 @@ clock = false               # true shows the time at the right end of the bar
 clock_format = "%H:%M"      # strftime codes, e.g. "%a %d %b %H:%M:%S"
 window_format = "{number}:{name}{flags}"    # each window's entry, see below
 # active_window_format      # the active window's entry; defaults to window_format
+in_border = true            # with boxed borders: write the bar into the bottom border
 
 [colors]
 status_fg = "black"
@@ -155,6 +156,19 @@ color = true                # false: no color (-C)
 keep_style = false          # keep color and type when crossing edges (-K)
 args = []                   # anything else, passed on as is
 ```
+
+With `borders = "boxed"`, the status bar is written into the panes' bottom
+border instead of taking a line of its own:
+
+```
+└─ [barbelo] 1:barbelo:bash 2:barbelo:nvim ──────────────── 15:58 ─┘
+```
+
+The title, or the mode's name, is then drawn in the mode's color
+(`active_border` in insert mode, `normal_bg`, `visual_bg` or `hints_bg`
+otherwise), and the active pane's frame takes that same color. The rest of
+the text uses the terminal's own colors unless `window_fg` and friends are
+set. Set `in_border = false` to keep a separate bar.
 
 Window entries in the status bar can use these placeholders:
 
