@@ -58,20 +58,9 @@ impl Window {
     }
 
     /// Moves the border of the split at `path` by `delta` columns or rows,
-    /// leaving a few cells of contents on each side.
+    /// leaving the other borders where they are as far as possible.
     pub fn move_split(&mut self, path: &[bool], delta: i32, area: Rect) {
-        let layout = self.layout(area);
-        let Some(edge) = layout.edges.iter().find(|e| e.path == path) else {
-            return;
-        };
-        // Three cells of contents, plus a frame with boxed borders.
-        let min = 3 + 2 * (i32::from(layout.gap) - 1);
-        let max = i32::from(edge.avail) - min;
-        if max < min {
-            return;
-        }
-        let first = (i32::from(edge.first) + delta).clamp(min, max) as u16;
-        self.root.set_split(path, first, edge.avail);
+        self.root.move_split(path, delta, area, self.border_style);
         self.resize(area);
     }
 

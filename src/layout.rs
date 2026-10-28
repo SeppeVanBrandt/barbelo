@@ -19,6 +19,14 @@ impl Rect {
         self.y + self.h
     }
 
+    /// Width for a split side by side, height for one stacked.
+    fn along(&self, split: Split) -> u16 {
+        match split {
+            Split::Horizontal => self.w,
+            Split::Vertical => self.h,
+        }
+    }
+
     /// The rect shrunk by one cell on every side.
     fn inset(&self) -> Rect {
         Rect {
@@ -54,6 +62,25 @@ pub enum BorderChars {
     Block,
     /// Cells filled with the border color.
     Solid,
+}
+
+/// How much room borders take.
+#[derive(Clone, Copy)]
+struct Spacing {
+    /// Cells between the two halves of a split.
+    gap: u16,
+    /// The fewest columns or rows a pane gets, border included: three cells
+    /// of contents.
+    min: u16,
+}
+
+impl BorderStyle {
+    fn spacing(self) -> Spacing {
+        match self {
+            BorderStyle::Shared => Spacing { gap: 1, min: 3 },
+            BorderStyle::Boxed => Spacing { gap: 0, min: 5 },
+        }
+    }
 }
 
 /// How a split arranges its two children.
@@ -96,10 +123,6 @@ pub struct Edge {
     pub path: SplitPath,
     /// With boxed borders, the first column or row of the second half.
     pub border: Border,
-    /// Columns or rows given to the first half.
-    pub first: u16,
-    /// Columns or rows the two halves share.
-    pub avail: u16,
 }
 
 /// A one-cell-wide line separating two panes.
@@ -169,29 +192,102 @@ impl Node {
                 if separators {
                     out.borders.push(border);
                 }
-                let (first, avail) = match split {
-                    Split::Horizontal => (a.w, a.w + b.w),
-                    Split::Vertical => (a.h, a.h + b.h),
-                };
                 out.edges.push(Edge {
                     path: path.clone(),
                     border,
-                    first,
-                    avail,
                 });
             }
         }
     }
 
-    /// Gives the first half of the split at `path` `first` of its `avail`
-    /// columns or rows.
-    pub fn set_split(&mut self, path: &[bool], first: u16, avail: u16) {
-        match (self, path.split_first()) {
-            (Node::Split { ratio, .. }, None) => *ratio = first as f32 / avail.max(1) as f32,
-            (Node::Split { first: a, second: b, .. }, Some((&second, rest))) => {
-                if second { b } else { a }.set_split(rest, first, avail)
+    /// Moves the border of the split at `path` by `delta` columns or rows.
+    /// Every other border stays where it is on screen, unless a pane would
+    /// get too small; then it is pushed along.
+    pub fn move_split(&mut self, path: &[bool], delta: i32, area: Rect, style: BorderStyle) {
+        let Node::Split {
+            split,
+            ratio,
+            first,
+            second,
+        } = self
+        else {
+            return;
+        };
+        let (a, b, _) = split_rect(area, *split, style == BorderStyle::Shared, *ratio);
+        let spacing = style.spacing();
+        match path.split_first() {
+            Some((&false, rest)) => first.move_split(rest, delta, a, style),
+            Some((&true, rest)) => second.move_split(rest, delta, b, style),
+            None => {
+                let axis = *split;
+                let (s1, s2) = (i32::from(a.along(axis)), i32::from(b.along(axis)));
+                let lo = i32::from(first.min_size(axis, spacing)) - s1;
+                let hi = s2 - i32::from(second.min_size(axis, spacing));
+                if lo > hi {
+                    return;
+                }
+                let moved = delta.clamp(lo, hi);
+                // Panes that are already too small would make the border
+                // jump the other way; leave it then.
+                if moved == 0 || (moved > 0) != (delta > 0) {
+                    return;
+                }
+                first.absorb(axis, moved, true, s1, spacing);
+                second.absorb(axis, -moved, false, s2, spacing);
+                *ratio = (s1 + moved) as f32 / (s1 + s2) as f32;
             }
-            (Node::Leaf(_), _) => {}
+        }
+    }
+
+    /// Changes the size of this subtree along `axis` by `delta` cells, at
+    /// its far end (right or bottom) or its near end, keeping the borders
+    /// inside where they are on screen as far as the panes allow.
+    fn absorb(&mut self, axis: Split, delta: i32, far: bool, size: i32, spacing: Spacing) {
+        let Node::Split {
+            split,
+            ratio,
+            first,
+            second,
+        } = self
+        else {
+            return;
+        };
+        if *split != axis {
+            // Both halves span the whole size along `axis`.
+            first.absorb(axis, delta, far, size, spacing);
+            second.absorb(axis, delta, far, size, spacing);
+            return;
+        }
+        let avail = (size - i32::from(spacing.gap)).max(0);
+        let s1 = i32::from(first_size(avail as u16, *ratio));
+        let s2 = avail - s1;
+        let new_avail = (avail + delta).max(0);
+        // The half at the moving end takes the change, as far as it can.
+        let n1 = if far {
+            let n2 = (s2 + delta).max(i32::from(second.min_size(axis, spacing)));
+            new_avail - n2
+        } else {
+            (s1 + delta).max(i32::from(first.min_size(axis, spacing)))
+        };
+        let n2 = new_avail - n1;
+        first.absorb(axis, n1 - s1, far, s1, spacing);
+        second.absorb(axis, n2 - s2, far, s2, spacing);
+        *ratio = n1 as f32 / new_avail.max(1) as f32;
+    }
+
+    /// The fewest columns or rows this subtree fits in along `axis`.
+    fn min_size(&self, axis: Split, spacing: Spacing) -> u16 {
+        match self {
+            Node::Leaf(_) => spacing.min,
+            Node::Split {
+                split,
+                first,
+                second,
+                ..
+            } => {
+                let (a, b) = (first.min_size(axis, spacing), second.min_size(axis, spacing));
+                if *split == axis { a + spacing.gap + b } else { a.max(b) }
+            }
         }
     }
 
@@ -383,6 +479,65 @@ mod tests {
         assert_eq!(neighbor(&layout, 2, Direction::Up, 50), Some(1));
         assert_eq!(neighbor(&layout, 2, Direction::Left, 15), Some(0));
         assert_eq!(neighbor(&layout, 0, Direction::Left, 0), None);
+    }
+
+    /// Column of every vertical border and row of every horizontal one.
+    fn border_positions(root: &Node, style: BorderStyle) -> Vec<u16> {
+        let mut out: Vec<u16> = root
+            .layout(AREA, style)
+            .edges
+            .iter()
+            .map(|e| match e.border {
+                Border::Vertical { x, .. } => x,
+                Border::Horizontal { y, .. } => y,
+            })
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn moving_a_border_leaves_the_others_in_place() {
+        for style in [BorderStyle::Shared, BorderStyle::Boxed] {
+            // Three columns, then the middle one stacked: |  |=|  |
+            let mut root = Node::Leaf(0);
+            root.split(0, 1, Split::Horizontal);
+            root.split(1, 2, Split::Horizontal);
+            root.split(1, 3, Split::Vertical);
+            let before = border_positions(&root, style);
+
+            // The first border: the second one, and the middle column's
+            // horizontal border, stay put.
+            root.move_split(&[], -4, AREA, style);
+            let after = border_positions(&root, style);
+            assert_eq!(after[0], before[0], "{style:?}"); // horizontal, row 12
+            assert_eq!(after[1], before[1] - 4, "{style:?}");
+            assert_eq!(after[2], before[2], "{style:?}");
+
+            // Moving the horizontal border moves nothing else.
+            root.move_split(&[true, false], -3, AREA, style);
+            let moved = border_positions(&root, style);
+            assert_eq!(moved[1..], after[1..], "{style:?}");
+            assert_eq!(moved[0], after[0] - 3, "{style:?}");
+        }
+    }
+
+    #[test]
+    fn borders_are_pushed_only_when_panes_get_too_small() {
+        let mut root = Node::Leaf(0);
+        root.split(0, 1, Split::Horizontal);
+        root.split(1, 2, Split::Horizontal);
+        assert_eq!(border_positions(&root, BorderStyle::Shared), [40, 61]);
+        // Up to the second border, leaving three columns between them.
+        root.move_split(&[], 17, AREA, BorderStyle::Shared);
+        assert_eq!(border_positions(&root, BorderStyle::Shared), [57, 61]);
+        // Further pushes the second one along, until the last pane is three
+        // columns wide too.
+        root.move_split(&[], 100, AREA, BorderStyle::Shared);
+        assert_eq!(border_positions(&root, BorderStyle::Shared), [AREA.w - 8, AREA.w - 4]);
+        // And back: the second border stays where it was pushed to.
+        root.move_split(&[], -30, AREA, BorderStyle::Shared);
+        assert_eq!(border_positions(&root, BorderStyle::Shared), [AREA.w - 38, AREA.w - 4]);
     }
 
     #[test]

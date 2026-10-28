@@ -208,7 +208,7 @@ mod tests {
         root.split(1, 2, Split::Vertical);
         root.split(0, 3, Split::Vertical);
         // Move the right half's border up, so the two don't line up.
-        root.set_split(&[true], 5, 23);
+        root.move_split(&[true], -7, AREA, BorderStyle::Shared);
         let nodes = layout_nodes(&root, BorderStyle::Shared);
         assert_eq!(nodes.len(), 2);
         assert_eq!((nodes[0].x, nodes[0].y), (40, 5));
