@@ -12,8 +12,9 @@ use crate::clock;
 use crate::config::{Config, ConfigColor};
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
-use crate::layout::{Border, BorderChars, Rect};
+use crate::layout::{Border, BorderChars, Layout, Rect};
 use crate::pane::PaneId;
+use crate::resize::{self, ResizeMode};
 
 pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     queue!(out, BeginSynchronizedUpdate, Hide)?;
@@ -79,6 +80,10 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     let prompt_cursor = draw_status(out, app)?;
     if prompt_cursor.is_some() {
         cursor = prompt_cursor;
+    }
+    if let Some(mode) = &app.resize {
+        draw_resize(out, mode, &layout, app)?;
+        cursor = None;
     }
 
     let shape = match app.mode() {
@@ -371,6 +376,40 @@ fn border_style(
     Ok(Glyphs::of(chars))
 }
 
+/// Marks every node; the selected one in the resize color, with the keys
+/// that move it next to it.
+fn draw_resize(out: &mut impl Write, mode: &ResizeMode, layout: &Layout, app: &App) -> io::Result<()> {
+    let colors = &app.config.colors;
+    let nodes = resize::layout_nodes(layout);
+    let selected = mode.selected(&nodes);
+    let (cols, rows) = app.size;
+    queue!(out, SetAttribute(Attribute::Reset), SetAttribute(Attribute::Bold))?;
+    for (i, node) in nodes.iter().enumerate() {
+        let active = Some(i) == selected;
+        let fg = if active { colors.resize_bg.0 } else { Color::Reset };
+        queue!(out, MoveTo(node.x, node.y), SetForegroundColor(fg), Print('●'))?;
+        if !active {
+            continue;
+        }
+        let mut keys = Vec::new();
+        if !node.vertical.is_empty() {
+            keys.extend([(-1, 0, 'h'), (1, 0, 'l')]);
+        }
+        if !node.horizontal.is_empty() {
+            keys.extend([(0, -1, 'k'), (0, 1, 'j')]);
+        }
+        queue!(out, SetForegroundColor(colors.resize_fg.0), SetBackgroundColor(colors.resize_bg.0))?;
+        for (dx, dy, key) in keys {
+            let (x, y) = (i32::from(node.x) + dx, i32::from(node.y) + dy);
+            if (0..i32::from(cols)).contains(&x) && (0..i32::from(rows)).contains(&y) {
+                queue!(out, MoveTo(x as u16, y as u16), Print(key))?;
+            }
+        }
+        queue!(out, SetBackgroundColor(Color::Reset))?;
+    }
+    queue!(out, SetAttribute(Attribute::Reset))
+}
+
 /// Draws a box around each pane, highlighting the active one.
 fn draw_frames(
     out: &mut impl Write,
@@ -409,6 +448,7 @@ struct Segment {
 fn mode_color(app: &App) -> ConfigColor {
     let colors = &app.config.colors;
     match app.mode() {
+        _ if app.resize.is_some() => colors.resize_bg,
         _ if app.hinting() => colors.hints_bg,
         None => colors.active_border,
         Some(Mode::Normal) => colors.normal_bg,
@@ -432,6 +472,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     // The mode's name takes the place of the title, except in insert mode.
     let title = if status.greek { "[βαρβηλώ]" } else { "[barbelo]" };
     let (label, fg, bg) = match app.mode() {
+        _ if app.resize.is_some() => (Some("RESIZE"), colors.resize_fg, colors.resize_bg),
         _ if app.hinting() => (Some("HINTS"), colors.hints_fg, colors.hints_bg),
         None => {
             let (fg, bg) = colors.insert();

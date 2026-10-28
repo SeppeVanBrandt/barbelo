@@ -73,15 +73,33 @@ pub enum Direction {
     Down,
 }
 
-/// Binary tree of panes. Every split divides its area evenly.
+/// Binary tree of panes.
 #[derive(Debug)]
 pub enum Node {
     Leaf(PaneId),
     Split {
         split: Split,
+        /// Share of the space that goes to `first`.
+        ratio: f32,
         first: Box<Node>,
         second: Box<Node>,
     },
+}
+
+/// Where a split sits in the tree: from the root, `false` for the first
+/// child and `true` for the second.
+pub type SplitPath = Vec<bool>;
+
+/// The line between the two halves of a split, wherever the split is drawn.
+#[derive(Clone, Debug)]
+pub struct Edge {
+    pub path: SplitPath,
+    /// With boxed borders, the first column or row of the second half.
+    pub border: Border,
+    /// Columns or rows given to the first half.
+    pub first: u16,
+    /// Columns or rows the two halves share.
+    pub avail: u16,
 }
 
 /// A one-cell-wide line separating two panes.
@@ -96,6 +114,8 @@ pub struct Layout {
     pub borders: Vec<Border>,
     /// Box around each pane, with boxed borders.
     pub frames: Vec<(PaneId, Rect)>,
+    /// Every split, with either border style.
+    pub edges: Vec<Edge>,
     /// Cells between the contents of two neighbouring panes.
     pub gap: u16,
 }
@@ -112,13 +132,15 @@ impl Node {
             panes: Vec::new(),
             borders: Vec::new(),
             frames: Vec::new(),
+            edges: Vec::new(),
             gap: 1,
         };
+        let mut path = Vec::new();
         match style {
-            BorderStyle::Shared => self.layout_into(area, &mut out, true),
+            BorderStyle::Shared => self.layout_into(area, &mut out, true, &mut path),
             BorderStyle::Boxed => {
                 // Split without separators, then draw a box inside each part.
-                self.layout_into(area, &mut out, false);
+                self.layout_into(area, &mut out, false, &mut path);
                 out.gap = 2;
                 for (id, rect) in &mut out.panes {
                     out.frames.push((*id, *rect));
@@ -129,21 +151,62 @@ impl Node {
         out
     }
 
-    fn layout_into(&self, area: Rect, out: &mut Layout, separators: bool) {
+    fn layout_into(&self, area: Rect, out: &mut Layout, separators: bool, path: &mut SplitPath) {
         match self {
             Node::Leaf(id) => out.panes.push((*id, area)),
             Node::Split {
                 split,
+                ratio,
                 first,
                 second,
             } => {
-                let (a, b, border) = split_rect(area, *split, separators);
-                first.layout_into(a, out, separators);
-                second.layout_into(b, out, separators);
+                let (a, b, border) = split_rect(area, *split, separators, *ratio);
+                path.push(false);
+                first.layout_into(a, out, separators, path);
+                *path.last_mut().expect("just pushed") = true;
+                second.layout_into(b, out, separators, path);
+                path.pop();
                 if separators {
                     out.borders.push(border);
                 }
+                let (first, avail) = match split {
+                    Split::Horizontal => (a.w, a.w + b.w),
+                    Split::Vertical => (a.h, a.h + b.h),
+                };
+                out.edges.push(Edge {
+                    path: path.clone(),
+                    border,
+                    first,
+                    avail,
+                });
             }
+        }
+    }
+
+    /// Gives the first half of the split at `path` `first` of its `avail`
+    /// columns or rows.
+    pub fn set_split(&mut self, path: &[bool], first: u16, avail: u16) {
+        match (self, path.split_first()) {
+            (Node::Split { ratio, .. }, None) => *ratio = first as f32 / avail.max(1) as f32,
+            (Node::Split { first: a, second: b, .. }, Some((&second, rest))) => {
+                if second { b } else { a }.set_split(rest, first, avail)
+            }
+            (Node::Leaf(_), _) => {}
+        }
+    }
+
+    /// Divides every split evenly again.
+    pub fn equalize(&mut self) {
+        if let Node::Split {
+            ratio,
+            first,
+            second,
+            ..
+        } = self
+        {
+            *ratio = 0.5;
+            first.equalize();
+            second.equalize();
         }
     }
 
@@ -153,6 +216,7 @@ impl Node {
             Node::Leaf(id) if *id == target => {
                 *self = Node::Split {
                     split,
+                    ratio: 0.5,
                     first: Box::new(Node::Leaf(target)),
                     second: Box::new(Node::Leaf(new)),
                 };
@@ -173,11 +237,13 @@ impl Node {
             Node::Leaf(_) => Some(self),
             Node::Split {
                 split,
+                ratio,
                 first,
                 second,
             } => match (first.remove(target), second.remove(target)) {
                 (Some(a), Some(b)) => Some(Node::Split {
                     split,
+                    ratio,
                     first: Box::new(a),
                     second: Box::new(b),
                 }),
@@ -195,14 +261,15 @@ impl Node {
     }
 }
 
-/// Divides `area` in two, leaving a column or row for the border between
-/// them if `separator` is set.
-fn split_rect(area: Rect, split: Split, separator: bool) -> (Rect, Rect, Border) {
+/// Divides `area` in two, giving `ratio` of it to the first part and
+/// leaving a column or row for the border between them if `separator` is
+/// set.
+fn split_rect(area: Rect, split: Split, separator: bool, ratio: f32) -> (Rect, Rect, Border) {
     let gap = u16::from(separator);
     match split {
         Split::Horizontal => {
             let avail = area.w.saturating_sub(gap);
-            let w1 = avail.div_ceil(2);
+            let w1 = first_size(avail, ratio);
             let w2 = avail - w1;
             let a = Rect { w: w1, ..area };
             let b = Rect {
@@ -219,7 +286,7 @@ fn split_rect(area: Rect, split: Split, separator: bool) -> (Rect, Rect, Border)
         }
         Split::Vertical => {
             let avail = area.h.saturating_sub(gap);
-            let h1 = avail.div_ceil(2);
+            let h1 = first_size(avail, ratio);
             let h2 = avail - h1;
             let a = Rect { h: h1, ..area };
             let b = Rect {
@@ -235,6 +302,15 @@ fn split_rect(area: Rect, split: Split, separator: bool) -> (Rect, Rect, Border)
             (a, b, border)
         }
     }
+}
+
+/// The part of `avail` that goes first, leaving at least one cell for each.
+fn first_size(avail: u16, ratio: f32) -> u16 {
+    if avail < 2 {
+        return avail.div_ceil(2);
+    }
+    let first = (avail as f32 * ratio).round() as u16;
+    first.clamp(1, avail - 1)
 }
 
 /// Finds the pane adjacent to `from` in direction `dir`. When several panes

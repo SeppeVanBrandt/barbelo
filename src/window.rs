@@ -50,11 +50,35 @@ impl Window {
         }
     }
 
-    fn unzoom(&mut self, area: Rect) {
+    pub fn unzoom(&mut self, area: Rect) {
         if self.zoomed {
             self.zoomed = false;
             self.resize(area);
         }
+    }
+
+    /// Moves the border of the split at `path` by `delta` columns or rows,
+    /// leaving a few cells of contents on each side.
+    pub fn move_split(&mut self, path: &[bool], delta: i32, area: Rect) {
+        let layout = self.layout(area);
+        let Some(edge) = layout.edges.iter().find(|e| e.path == path) else {
+            return;
+        };
+        // Three cells of contents, plus a frame with boxed borders.
+        let min = 3 + 2 * (i32::from(layout.gap) - 1);
+        let max = i32::from(edge.avail) - min;
+        if max < min {
+            return;
+        }
+        let first = (i32::from(edge.first) + delta).clamp(min, max) as u16;
+        self.root.set_split(path, first, edge.avail);
+        self.resize(area);
+    }
+
+    /// Gives every pane in the window an even share again.
+    pub fn equalize(&mut self, area: Rect) {
+        self.root.equalize();
+        self.resize(area);
     }
 
     pub fn active_pane(&mut self) -> &mut Pane {

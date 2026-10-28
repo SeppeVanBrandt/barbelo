@@ -23,6 +23,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` o ``       | Focus next pane                         |
 | `` ` ; `` / `` ` : `` | Jump back to the last active pane |
 | `` ` z ``       | Zoom the active pane to fill the window, or unzoom |
+| `` ` r ``       | Resize mode: move the borders between panes |
 | `` ` , ``       | Rename the window (empty name: back to automatic) |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
@@ -35,6 +36,23 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 A zoomed window is marked `*` in the status bar, and the active window is
 shown in bold. Moving focus, splitting or
 closing a pane unzooms it.
+
+## Resize mode
+
+`` ` r `` marks every node: a point where a vertical and a horizontal border
+meet, or the middle of a border that meets no other. The selected node is
+highlighted, with the keys that move it shown around it.
+
+| Keys                    | Action                                   |
+|-------------------------|------------------------------------------|
+| `h` `j` `k` `l` / arrows | Move the node, resizing the panes around it |
+| `H` `J` `K` `L`         | Move it 5 cells at a time                |
+| `Tab` / `Shift-Tab`     | Select the next / previous node          |
+| `=`                     | Give every pane in the window an equal share |
+| `Esc` `Enter` `q` `r`   | Leave resize mode                        |
+
+Borders that line up, like the two halves of a `┼`, share a node and move
+together.
 
 ## Screensaver
 
@@ -122,6 +140,8 @@ visual_fg = "white"
 visual_bg = "magenta"
 hints_fg = "black"
 hints_bg = "yellow"
+resize_fg = "black"         # resize mode: the status label and the keys
+resize_bg = "cyan"          # around the selected node, which is drawn in resize_bg
 active_border = "green"
 inactive_border = "dark-grey"
 # window_fg / window_bg                 # window entries; default to the bar colors

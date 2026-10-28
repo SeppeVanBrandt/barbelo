@@ -81,6 +81,8 @@ pub struct Colors {
     pub visual_bg: ConfigColor,
     pub hints_fg: ConfigColor,
     pub hints_bg: ConfigColor,
+    pub resize_fg: ConfigColor,
+    pub resize_bg: ConfigColor,
     pub active_border: ConfigColor,
     pub inactive_border: ConfigColor,
     /// Window entries in the bar; the bar's colors unless set.
@@ -103,6 +105,8 @@ impl Default for Colors {
             visual_bg: ConfigColor(Color::Magenta),
             hints_fg: ConfigColor(Color::Black),
             hints_bg: ConfigColor(Color::Yellow),
+            resize_fg: ConfigColor(Color::Black),
+            resize_bg: ConfigColor(Color::Cyan),
             active_border: ConfigColor(Color::Green),
             inactive_border: ConfigColor(Color::DarkGrey),
             window_fg: None,

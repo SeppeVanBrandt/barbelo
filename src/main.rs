@@ -9,6 +9,7 @@ mod layout;
 mod pane;
 mod queries;
 mod render;
+mod resize;
 mod window;
 
 use std::io;

@@ -19,6 +19,7 @@ use crate::layout::{Direction, Rect, Split};
 use crate::pane::{Pane, PaneContext, PaneId};
 use crate::queries::TerminalColors;
 use crate::render;
+use crate::resize::{self, ResizeMode};
 use crate::window::Window;
 
 /// Frame interval while a scroll animation is running.
@@ -42,6 +43,8 @@ pub struct App {
     pub message: Option<String>,
     /// New name being typed for the active window.
     pub rename: Option<String>,
+    /// Set while borders are being moved in the active window.
+    pub resize: Option<ResizeMode>,
     /// The screensaver while it runs, drawn over everything else.
     pub screensaver: Option<(PaneId, Pane)>,
     /// Time of the last key press or paste, for starting the screensaver.
@@ -66,6 +69,7 @@ impl App {
             prefix_pending: false,
             message: None,
             rename: None,
+            resize: None,
             screensaver: None,
             last_input: Instant::now(),
             paste_buffer: None,
@@ -277,6 +281,8 @@ impl App {
         let prefix = self.config.prefix.0;
         if self.rename.is_some() {
             self.rename_key(key);
+        } else if self.resize.is_some() {
+            self.resize_key(key);
         } else if self.prefix_pending {
             self.prefix_pending = false;
             if let Err(e) = self.command(key) {
@@ -329,6 +335,57 @@ impl App {
             }
             KeyCode::Char(c) if !ctrl => text.push(c),
             _ => {}
+        }
+    }
+
+    fn start_resize(&mut self) {
+        let area = self.pane_area();
+        let window = &mut self.windows[self.active];
+        window.unzoom(area);
+        let layout = window.layout(area);
+        let Some(active) = layout.rect_of(window.active) else {
+            return;
+        };
+        self.resize = ResizeMode::new(&resize::layout_nodes(&layout), active);
+        if self.resize.is_none() {
+            self.message = Some("nothing to resize".into());
+        }
+    }
+
+    /// Moves the selected node with hjkl (HJKL for bigger steps), picks
+    /// another one with Tab, and evens out the window with `=`.
+    fn resize_key(&mut self, key: KeyEvent) {
+        let area = self.pane_area();
+        let window = &mut self.windows[self.active];
+        let nodes = resize::layout_nodes(&window.layout(area));
+        let Some(mode) = &mut self.resize else {
+            return;
+        };
+        if nodes.is_empty() {
+            self.resize = None;
+            return;
+        }
+        let step = |c: char| if c.is_ascii_uppercase() { 5 } else { 1 };
+        let (paths, delta) = match key.code {
+            KeyCode::Tab => return mode.cycle(&nodes, true),
+            KeyCode::BackTab => return mode.cycle(&nodes, false),
+            KeyCode::Char('=') => return window.equalize(area),
+            KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q' | 'r') => {
+                self.resize = None;
+                return;
+            }
+            KeyCode::Left => (&mode.vertical, -1),
+            KeyCode::Right => (&mode.vertical, 1),
+            KeyCode::Up => (&mode.horizontal, -1),
+            KeyCode::Down => (&mode.horizontal, 1),
+            KeyCode::Char(c @ ('h' | 'H')) => (&mode.vertical, -step(c)),
+            KeyCode::Char(c @ ('l' | 'L')) => (&mode.vertical, step(c)),
+            KeyCode::Char(c @ ('k' | 'K')) => (&mode.horizontal, -step(c)),
+            KeyCode::Char(c @ ('j' | 'J')) => (&mode.horizontal, step(c)),
+            _ => return,
+        };
+        for path in paths {
+            window.move_split(path, delta, area);
         }
     }
 
@@ -415,6 +472,7 @@ impl App {
                 }
             }
             KeyCode::Char('s') => self.start_screensaver(),
+            KeyCode::Char('r') => self.start_resize(),
             KeyCode::Char('q') => self.quit = true,
             _ => {}
         }
