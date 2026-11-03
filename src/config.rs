@@ -33,6 +33,8 @@ pub struct BetaConfig {
     pub function_keys: bool,
     pub menu_key: FunctionKey,
     pub normal_key: FunctionKey,
+    /// Pick a window by its letter.
+    pub windows_key: FunctionKey,
     pub hints_key: FunctionKey,
     /// Keys kept free for later jobs: they do nothing, and don't reach the
     /// pane either.
@@ -45,8 +47,9 @@ impl Default for BetaConfig {
             function_keys: false,
             menu_key: FunctionKey(13),
             normal_key: FunctionKey(14),
-            hints_key: FunctionKey(15),
-            spare_keys: vec![FunctionKey(16)],
+            windows_key: FunctionKey(15),
+            hints_key: FunctionKey(16),
+            spare_keys: Vec::new(),
         }
     }
 }
@@ -56,6 +59,7 @@ impl Default for BetaConfig {
 pub enum FunctionAction {
     Menu,
     Normal,
+    Windows,
     Hints,
     Spare,
 }
@@ -66,6 +70,7 @@ impl BetaConfig {
         let keys = [
             (self.menu_key, FunctionAction::Menu),
             (self.normal_key, FunctionAction::Normal),
+            (self.windows_key, FunctionAction::Windows),
             (self.hints_key, FunctionAction::Hints),
         ];
         let spare = self.spare_keys.iter().map(|&k| (k, FunctionAction::Spare));
@@ -161,6 +166,11 @@ pub struct Colors {
     pub active_border: ConfigColor,
     pub inactive_border: ConfigColor,
     /// Window entries in the bar; the bar's colors unless set.
+    /// Letters shown for picking a window.
+    pub window_letter: ConfigColor,
+    /// The status bar while picking a window; its usual colors unless set.
+    pub window_pick_fg: Option<ConfigColor>,
+    pub window_pick_bg: Option<ConfigColor>,
     pub window_fg: Option<ConfigColor>,
     pub window_bg: Option<ConfigColor>,
     pub active_window_fg: Option<ConfigColor>,
@@ -184,6 +194,9 @@ impl Default for Colors {
             resize_bg: ConfigColor(Color::Cyan),
             active_border: ConfigColor(Color::Green),
             inactive_border: ConfigColor(Color::DarkGrey),
+            window_letter: ConfigColor(Color::Red),
+            window_pick_fg: None,
+            window_pick_bg: None,
             window_fg: None,
             window_bg: None,
             active_window_fg: None,
@@ -228,6 +241,8 @@ pub struct WindowsConfig {
     pub border_chars: BorderChars,
     /// Characters for the active pane's border; `border_chars` unless set.
     pub active_border_chars: Option<BorderChars>,
+    /// Keys for picking a window, first window first.
+    pub letters: Letters,
 }
 
 impl WindowsConfig {
@@ -246,7 +261,34 @@ impl Default for WindowsConfig {
             borders: BorderStyle::Shared,
             border_chars: BorderChars::Light,
             active_border_chars: None,
+            letters: Letters("asdfjkl;qweruiop".chars().collect()),
         }
+    }
+}
+
+/// Distinct characters to press, such as the letters for picking a window.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Letters(pub Vec<char>);
+
+impl TryFrom<String> for Letters {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, String> {
+        let mut letters = Vec::new();
+        for c in s.chars() {
+            if c.is_whitespace() || c.is_control() {
+                return Err(format!("window letters can't contain {c:?}"));
+            }
+            if letters.contains(&c) {
+                return Err(format!("window letters contain {c:?} twice"));
+            }
+            letters.push(c);
+        }
+        if letters.is_empty() {
+            return Err("window letters can't be empty".into());
+        }
+        Ok(Self(letters))
     }
 }
 
@@ -677,16 +719,20 @@ mod tests {
     fn function_keys() {
         let config = parse("").unwrap();
         assert_eq!(config.beta.action(13), Some(FunctionAction::Menu));
-        assert_eq!(config.beta.action(16), Some(FunctionAction::Spare));
+        assert_eq!(config.beta.action(15), Some(FunctionAction::Windows));
+        assert_eq!(config.beta.action(16), Some(FunctionAction::Hints));
         assert_eq!(config.beta.action(17), None);
         let config = parse(
-            "[beta]\nmenu_key = \"F14\"\nnormal_key = \"F15\"\nhints_key = \"F16\"\nspare_keys = [\"F17\"]",
+            "[beta]\nmenu_key = \"F14\"\nnormal_key = \"F15\"\nwindows_key = \"F16\"\nhints_key = \"F17\"\nspare_keys = [\"F18\"]",
         )
         .unwrap();
         assert_eq!(config.beta.action(13), None);
         assert_eq!(config.beta.action(14), Some(FunctionAction::Menu));
-        assert_eq!(config.beta.action(16), Some(FunctionAction::Hints));
-        assert_eq!(config.beta.action(17), Some(FunctionAction::Spare));
+        assert_eq!(config.beta.action(16), Some(FunctionAction::Windows));
+        assert_eq!(config.beta.action(17), Some(FunctionAction::Hints));
+        assert_eq!(config.beta.action(18), Some(FunctionAction::Spare));
+        assert!(parse("[windows]\nletters = \"aa\"").is_err());
+        assert_eq!(parse("").unwrap().windows.letters.0[7], ';');
         assert!(parse("[beta]\nmenu_key = \"F12\"").is_err());
         assert!(parse("[beta]\nmenu_key = \"14\"").is_err());
     }

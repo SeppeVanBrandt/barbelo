@@ -18,6 +18,7 @@ pub const SECTIONS: &[Section] = &[
             ("c", "new window"),
             ("n p", "next / previous"),
             ("1-9 0", "go to window"),
+            ("w", "pick by letter"),
             ("< >", "move left / right"),
             (",", "rename"),
             ("&", "close"),
@@ -48,7 +49,10 @@ pub const SECTIONS: &[Section] = &[
 
 /// Shown below the commands.
 pub fn footer(beta: &BetaConfig) -> String {
-    format!("{} normal mode   {} hint mode   Esc close", beta.normal_key, beta.hints_key)
+    format!(
+        "{} normal   {} windows   {} hints   Esc close",
+        beta.normal_key, beta.windows_key, beta.hints_key
+    )
 }
 
 /// The number of a function key from F13 to F24. Many terminals send these

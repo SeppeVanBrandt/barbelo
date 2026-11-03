@@ -588,6 +588,7 @@ struct Segment {
 fn mode_color(app: &App) -> ConfigColor {
     let colors = &app.config.colors;
     match app.mode() {
+        _ if app.picking_window => colors.window_letter,
         _ if app.resize.is_some() => colors.resize_bg,
         _ if app.hinting() => colors.hints_bg,
         None => colors.active_border,
@@ -612,6 +613,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     // The mode's name takes the place of the title, except in insert mode.
     let title = if status.greek { "[βαρβηλώ]" } else { "[barbelo]" };
     let (label, fg, bg) = match app.mode() {
+        _ if app.picking_window => (Some("WINDOW"), ConfigColor(Color::Black), colors.window_letter),
         _ if app.resize.is_some() => (Some("RESIZE"), colors.resize_fg, colors.resize_bg),
         _ if app.hinting() => (Some("HINTS"), colors.hints_fg, colors.hints_bg),
         None => {
@@ -629,13 +631,23 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     // In the border, text sits on the terminal's own background, and the
     // mode's name is written in the mode's color.
     let (slot_fg, slot_bg) = if in_border { (mode_color(app), plain) } else { (fg, bg) };
-    let (bar_fg, bar_bg) = if in_border {
+    let (mut bar_fg, mut bar_bg) = if in_border {
         (plain, plain)
     } else if status.color_by_mode {
         (fg, bg)
     } else {
         (colors.status_fg, colors.status_bg)
     };
+    // Picking a window can give the bar colors of its own; in the border,
+    // a background then fills the whole line.
+    let mut filled = !in_border;
+    if app.picking_window {
+        bar_fg = colors.window_pick_fg.unwrap_or(bar_fg);
+        if let Some(bg) = colors.window_pick_bg {
+            bar_bg = bg;
+            filled = true;
+        }
+    }
     let segment = |text: String, bold: bool| Segment {
         text,
         bold,
@@ -661,12 +673,34 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
                 true => (status.active_window_format(), colors.active_window_fg, colors.active_window_bg),
                 false => (status.window_format.as_str(), colors.window_fg, colors.window_bg),
             };
-            let text = window.status_entry(format, &app.config.windows.name, i + 1);
-            left.push(Segment {
-                fg: fg.unwrap_or(bar_fg).0,
-                bg: bg.unwrap_or(bar_bg).0,
-                ..segment(text, active)
-            });
+            let (fg, bg) = (fg.unwrap_or(bar_fg).0, bg.unwrap_or(bar_bg).0);
+            let entry = |format: &str| Segment {
+                fg,
+                bg,
+                ..segment(window.status_entry(format, &app.config.windows.name, i + 1), active)
+            };
+            // While picking a window, its letter takes the number's place,
+            // or goes in front if the format has no number.
+            let letter = app.picking_window.then(|| app.config.windows.letters.0.get(i)).flatten();
+            let Some(letter) = letter else {
+                left.push(entry(format));
+                continue;
+            };
+            let letter = || Segment {
+                text: letter.to_string(),
+                bold: true,
+                fg: colors.window_letter.0,
+                bg,
+            };
+            if !format.contains("{number}") {
+                left.push(letter());
+            }
+            for (k, part) in format.split("{number}").enumerate() {
+                if k > 0 {
+                    left.push(letter());
+                }
+                left.push(entry(part));
+            }
         }
     }
 
@@ -690,9 +724,10 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     let right_len = len(&right).min(width);
     let left_room = width - right_len;
     let left_len = len(&left).min(left_room);
-    if !in_border {
+    if filled {
         // A bar of its own is filled from end to end; in the border, the
-        // border shows through between the two sides.
+        // border shows through between the two sides, unless picking a
+        // window gives it a background.
         left.push(segment(" ".repeat(left_room - left_len), false));
     }
 

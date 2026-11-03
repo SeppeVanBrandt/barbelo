@@ -48,6 +48,8 @@ pub struct App {
     pub rename: Option<String>,
     /// Set while borders are being moved in the active window.
     pub resize: Option<ResizeMode>,
+    /// Whether windows are being picked by their letters.
+    pub picking_window: bool,
     /// The screensaver while it runs, drawn over everything else.
     pub screensaver: Option<(PaneId, Pane)>,
     /// Time of the last key press or paste, for starting the screensaver.
@@ -74,6 +76,7 @@ impl App {
             message: None,
             rename: None,
             resize: None,
+            picking_window: false,
             screensaver: None,
             last_input: Instant::now(),
             paste_buffer: None,
@@ -287,6 +290,8 @@ impl App {
             self.rename_key(key);
         } else if self.resize.is_some() {
             self.resize_key(key);
+        } else if self.picking_window {
+            self.pick_window_key(key);
         } else if self.prefix_pending {
             self.prefix_pending = false;
             let action = self.function_action(key);
@@ -372,6 +377,7 @@ impl App {
                 pane.hints = None;
                 pane.enter_copy_mode();
             }
+            FunctionAction::Windows => self.picking_window = !self.picking_window,
             // Hint mode, or back out of it.
             FunctionAction::Hints if pane.hints.is_some() => pane.hints = None,
             FunctionAction::Hints => {
@@ -381,6 +387,31 @@ impl App {
             }
             // Kept free for a future job, rather than going to the pane.
             FunctionAction::Spare => {}
+        }
+    }
+
+    /// Goes to the window whose letter is pressed. Esc cancels; another
+    /// function key cancels and does its own job.
+    fn pick_window_key(&mut self, key: KeyEvent) {
+        if let Some(action) = self.function_action(key) {
+            self.picking_window = false;
+            if action != FunctionAction::Windows {
+                self.function_key(action);
+            }
+            return;
+        }
+        match key.code {
+            KeyCode::Esc => self.picking_window = false,
+            KeyCode::Char(c) => {
+                let letters = &self.config.windows.letters.0;
+                if let Some(i) = letters.iter().position(|&l| l == c)
+                    && i < self.windows.len()
+                {
+                    self.active = i;
+                    self.picking_window = false;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -519,6 +550,7 @@ impl App {
             }
             KeyCode::Char('s') => self.start_screensaver(),
             KeyCode::Char('r') => self.start_resize(),
+            KeyCode::Char('w') => self.picking_window = true,
             KeyCode::Char('<') => self.move_window(-1),
             KeyCode::Char('>') => self.move_window(1),
             KeyCode::Char('q') => self.quit = true,

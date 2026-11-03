@@ -26,6 +26,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` r ``       | Resize mode: move the borders between panes |
 | `` ` , ``       | Rename the window (empty name: back to automatic) |
 | `` ` < `` / `` ` > `` | Move the window left / right in the status bar |
+| `` ` w ``       | Pick a window by its letter (`Esc` cancels) |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
 | `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |
@@ -46,11 +47,12 @@ With `beta.function_keys = true`, by default:
 |-------|--------|
 | F13   | Open the command menu: a pop-up with every prefix command; press one of its keys to run it, `Esc` to close |
 | F14   | Normal mode, or back to insert mode |
-| F15   | Hint mode, or back out of it |
-| F16   | Spare: does nothing yet, and isn't passed on to the pane |
+| F15   | Pick a window: the window numbers in the status bar turn into letters; press one to go there |
+| F16   | Hint mode, or back out of it |
 
 Any of F13 to F24 can take these jobs, with `menu_key`, `normal_key`,
-`hints_key` and `spare_keys`. The prefix key keeps working as well.
+`windows_key` and `hints_key`; keys listed in `spare_keys` do nothing and
+don't reach the pane either. The prefix key keeps working as well.
 Shift+F1 to Shift+F12 count as F13 to F24, since many terminals send those
 for them. Shift+F3 (F15) needs a terminal with the kitty keyboard protocol
 (kitty, foot, WezTerm, Ghostty, Alacritty, ...): in others it sends the
@@ -165,6 +167,8 @@ resize_fg = "black"         # resize mode: the status label and the keys
 resize_bg = "cyan"          # around the selected node, which is drawn in resize_bg
 active_border = "green"
 inactive_border = "dark-grey"
+window_letter = "red"       # the letters for picking a window
+# window_pick_fg / window_pick_bg       # the status bar while picking a window
 # window_fg / window_bg                 # window entries; default to the bar colors
 # active_window_fg / active_window_bg   # the active window's entry
 
@@ -179,6 +183,7 @@ dim_fg = "dark-grey"
 name = "{process}"          # also {dir} (directory name) and {path} (full directory)
 borders = "shared"          # or "boxed": a frame around every pane
 border_chars = "light"      # light, heavy, double, rounded, block or solid
+letters = "asdfjkl;qweruiop"  # keys for picking a window, first window first
 # active_border_chars       # for the active pane; defaults to border_chars
 
 [screensaver]
@@ -201,8 +206,9 @@ args = []                   # anything else, passed on as is
 function_keys = false       # turn on the function keys below
 menu_key = "F13"            # command menu
 normal_key = "F14"          # normal mode
-hints_key = "F15"           # hint mode
-spare_keys = ["F16"]        # kept free: do nothing, and don't reach the pane
+windows_key = "F15"         # pick a window by its letter
+hints_key = "F16"           # hint mode
+spare_keys = []             # kept free: do nothing, and don't reach the pane
 ```
 
 With `borders = "boxed"`, the status bar is written into the panes' bottom
