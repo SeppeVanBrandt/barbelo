@@ -22,6 +22,78 @@ pub struct Config {
     pub hints: HintsConfig,
     pub windows: WindowsConfig,
     pub screensaver: ScreensaverConfig,
+    pub beta: BetaConfig,
+}
+
+/// Features still being tried out, all off by default.
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BetaConfig {
+    /// Function keys for the command menu, normal mode, picking windows and hint mode.
+    pub function_keys: bool,
+    pub menu_key: FunctionKey,
+    pub normal_key: FunctionKey,
+    pub hints_key: FunctionKey,
+    /// Keys kept free for later jobs: they do nothing, and don't reach the
+    /// pane either.
+    pub spare_keys: Vec<FunctionKey>,
+}
+
+impl Default for BetaConfig {
+    fn default() -> Self {
+        Self {
+            function_keys: false,
+            menu_key: FunctionKey(13),
+            normal_key: FunctionKey(14),
+            hints_key: FunctionKey(15),
+            spare_keys: vec![FunctionKey(16)],
+        }
+    }
+}
+
+/// What a function key does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FunctionAction {
+    Menu,
+    Normal,
+    Hints,
+    Spare,
+}
+
+impl BetaConfig {
+    /// What F`n` does, if it is one of barbelo's keys.
+    pub fn action(&self, n: u8) -> Option<FunctionAction> {
+        let keys = [
+            (self.menu_key, FunctionAction::Menu),
+            (self.normal_key, FunctionAction::Normal),
+            (self.hints_key, FunctionAction::Hints),
+        ];
+        let spare = self.spare_keys.iter().map(|&k| (k, FunctionAction::Spare));
+        keys.into_iter().chain(spare).find(|(k, _)| k.0 == n).map(|(_, action)| action)
+    }
+}
+
+/// One of F13 to F24, written like "F14".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct FunctionKey(pub u8);
+
+impl TryFrom<String> for FunctionKey {
+    type Error = String;
+
+    fn try_from(s: String) -> Result<Self, String> {
+        s.strip_prefix(['F', 'f'])
+            .and_then(|n| n.parse().ok())
+            .filter(|n| (13..=24).contains(n))
+            .map(Self)
+            .ok_or_else(|| format!("invalid function key {s:?}: expected F13 to F24"))
+    }
+}
+
+impl std::fmt::Display for FunctionKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "F{}", self.0)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -599,6 +671,24 @@ mod tests {
         );
         assert!(parse("[screensaver]\nfps = 10").is_err());
         assert!(parse("[screensaver]\npipes = 0").is_err());
+    }
+
+    #[test]
+    fn function_keys() {
+        let config = parse("").unwrap();
+        assert_eq!(config.beta.action(13), Some(FunctionAction::Menu));
+        assert_eq!(config.beta.action(16), Some(FunctionAction::Spare));
+        assert_eq!(config.beta.action(17), None);
+        let config = parse(
+            "[beta]\nmenu_key = \"F14\"\nnormal_key = \"F15\"\nhints_key = \"F16\"\nspare_keys = [\"F17\"]",
+        )
+        .unwrap();
+        assert_eq!(config.beta.action(13), None);
+        assert_eq!(config.beta.action(14), Some(FunctionAction::Menu));
+        assert_eq!(config.beta.action(16), Some(FunctionAction::Hints));
+        assert_eq!(config.beta.action(17), Some(FunctionAction::Spare));
+        assert!(parse("[beta]\nmenu_key = \"F12\"").is_err());
+        assert!(parse("[beta]\nmenu_key = \"14\"").is_err());
     }
 
     #[test]

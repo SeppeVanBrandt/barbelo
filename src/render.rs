@@ -13,6 +13,7 @@ use crate::config::{Config, ConfigColor};
 use crate::copy::{CopyMode, Line, Mode};
 use crate::hints::{HintMode, Overlay};
 use crate::layout::{Border, BorderChars, Layout, Rect};
+use crate::menu;
 use crate::pane::PaneId;
 use crate::resize::{self, ResizeMode};
 
@@ -83,6 +84,10 @@ pub fn draw(app: &App, out: &mut impl Write) -> io::Result<()> {
     }
     if let Some(mode) = &app.resize {
         draw_resize(out, mode, &layout, app)?;
+        cursor = None;
+    }
+    if app.menu {
+        draw_menu(out, app)?;
         cursor = None;
     }
 
@@ -408,6 +413,141 @@ fn draw_resize(out: &mut impl Write, mode: &ResizeMode, layout: &Layout, app: &A
         queue!(out, SetBackgroundColor(Color::Reset))?;
     }
     queue!(out, SetAttribute(Attribute::Reset))
+}
+
+/// A line of the command menu.
+#[derive(Clone, Copy)]
+enum MenuLine {
+    Title(&'static str),
+    Entry(&'static str, &'static str),
+    Blank,
+}
+
+/// The menu's sections in `n` columns, each added to the shortest so far.
+fn menu_columns(n: usize) -> Vec<Vec<MenuLine>> {
+    let mut columns: Vec<Vec<MenuLine>> = (0..n).map(|_| Vec::new()).collect();
+    for s in menu::SECTIONS {
+        let column = columns.iter_mut().min_by_key(|c| c.len()).expect("n > 0");
+        if !column.is_empty() {
+            column.push(MenuLine::Blank);
+        }
+        column.push(MenuLine::Title(s.title));
+        column.extend(s.entries.iter().map(|&(keys, what)| MenuLine::Entry(keys, what)));
+    }
+    columns
+}
+
+/// Width of a column's keys, and of the whole column.
+fn menu_column_width(column: &[MenuLine]) -> (usize, usize) {
+    let keys = column
+        .iter()
+        .map(|line| match line {
+            MenuLine::Entry(keys, _) => keys.chars().count(),
+            _ => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    let width = column
+        .iter()
+        .map(|line| match line {
+            MenuLine::Title(title) => title.chars().count(),
+            MenuLine::Entry(_, what) => keys + 2 + what.chars().count(),
+            MenuLine::Blank => 0,
+        })
+        .max()
+        .unwrap_or(0);
+    (keys, width)
+}
+
+/// Draws the command menu in the middle of the screen, in as many columns
+/// as fit.
+fn draw_menu(out: &mut impl Write, app: &App) -> io::Result<()> {
+    const SPACING: usize = 3;
+    let (cols, rows) = app.size;
+    let fits = |columns: &[Vec<MenuLine>]| {
+        let widths: usize = columns.iter().map(|c| menu_column_width(c).1).sum();
+        widths + SPACING * (columns.len() - 1) + 4 <= cols as usize
+    };
+    let columns = (1..=menu::SECTIONS.len())
+        .rev()
+        .map(menu_columns)
+        .find(|c| fits(c))
+        .unwrap_or_else(|| menu_columns(1));
+    let widths: Vec<(usize, usize)> = columns.iter().map(|c| menu_column_width(c)).collect();
+    let content = widths.iter().map(|w| w.1).sum::<usize>() + SPACING * (widths.len() - 1);
+    let height = columns.iter().map(Vec::len).max().unwrap_or(0);
+
+    // The box: a border, a cell of padding, the columns, a blank line and
+    // the footer. Cut off if the screen is too small, leaving the status
+    // bar in view.
+    let footer = menu::footer(&app.config.beta);
+    let inner_w = content.max(footer.chars().count());
+    let rows = rows.saturating_sub(1);
+    let w = (inner_w + 4).min(cols as usize) as u16;
+    let h = (height + 4).min(rows as usize) as u16;
+    if w < 4 || h < 3 {
+        return Ok(());
+    }
+    let frame = Rect {
+        x: (cols - w) / 2,
+        y: (rows - h) / 2,
+        w,
+        h,
+    };
+    let colors = &app.config.colors;
+    let accent = colors.active_border.0;
+
+    queue!(out, SetAttribute(Attribute::Reset), SetForegroundColor(accent))?;
+    let line: String = "─".repeat(w as usize - 2);
+    let blank = " ".repeat(w as usize - 2);
+    queue!(out, MoveTo(frame.x, frame.y), Print(format!("┌{line}┐")))?;
+    for y in frame.y + 1..frame.bottom() - 1 {
+        queue!(out, MoveTo(frame.x, y), Print(format!("│{blank}│")))?;
+    }
+    queue!(out, MoveTo(frame.x, frame.bottom() - 1), Print(format!("└{line}┘")))?;
+    let title = " barbelo ";
+    if title.len() + 4 <= w as usize {
+        queue!(out, MoveTo(frame.x + 2, frame.y), SetAttribute(Attribute::Bold), Print(title))?;
+    }
+
+    let dim = colors.inactive_border.0;
+    let mut x = frame.x + 2;
+    for (column, &(key_width, width)) in columns.iter().zip(&widths) {
+        for (row, line) in column.iter().enumerate() {
+            let y = frame.y + 1 + row as u16;
+            match line {
+                MenuLine::Title(title) => put_inside(out, frame, (x, y), title, accent, true)?,
+                MenuLine::Entry(keys, what) => {
+                    put_inside(out, frame, (x, y), keys, accent, true)?;
+                    let x = x + key_width as u16 + 2;
+                    put_inside(out, frame, (x, y), what, Color::Reset, false)?;
+                }
+                MenuLine::Blank => {}
+            }
+        }
+        x += (width + SPACING) as u16;
+    }
+    let footer_at = (frame.x + 2, frame.bottom() - 2);
+    put_inside(out, frame, footer_at, &footer, dim, false)?;
+    queue!(out, SetAttribute(Attribute::Reset))
+}
+
+/// Prints `text` at `(x, y)`, cut off at the inside of `frame`.
+fn put_inside(
+    out: &mut impl Write,
+    frame: Rect,
+    (x, y): (u16, u16),
+    text: &str,
+    fg: Color,
+    bold: bool,
+) -> io::Result<()> {
+    let right = frame.right() - 2;
+    if y >= frame.bottom() - 1 || x >= right {
+        return Ok(());
+    }
+    let text: String = text.chars().take((right - x) as usize).collect();
+    let attr = if bold { Attribute::Bold } else { Attribute::NormalIntensity };
+    queue!(out, SetForegroundColor(fg), SetAttribute(attr), MoveTo(x, y), Print(text))
 }
 
 /// Draws a box around each pane, highlighting the active one.

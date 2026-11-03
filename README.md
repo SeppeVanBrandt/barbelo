@@ -38,6 +38,25 @@ A zoomed window is marked `*` in the status bar, and the active window is
 shown in bold. Moving focus, splitting or
 closing a pane unzooms it.
 
+## Function keys (beta)
+
+With `beta.function_keys = true`, by default:
+
+| Key   | Action |
+|-------|--------|
+| F13   | Open the command menu: a pop-up with every prefix command; press one of its keys to run it, `Esc` to close |
+| F14   | Normal mode, or back to insert mode |
+| F15   | Hint mode, or back out of it |
+| F16   | Spare: does nothing yet, and isn't passed on to the pane |
+
+Any of F13 to F24 can take these jobs, with `menu_key`, `normal_key`,
+`hints_key` and `spare_keys`. The prefix key keeps working as well.
+Shift+F1 to Shift+F12 count as F13 to F24, since many terminals send those
+for them. Shift+F3 (F15) needs a terminal with the kitty keyboard protocol
+(kitty, foot, WezTerm, Ghostty, Alacritty, ...): in others it sends the
+same bytes as a cursor position report and can't be told apart. barbelo
+turns the protocol on when the terminal supports it.
+
 ## Resize mode
 
 `` ` r `` marks every node: a point where a vertical and a horizontal border
@@ -177,6 +196,13 @@ bold = true                 # false: no bold (-B)
 color = true                # false: no color (-C)
 keep_style = false          # keep color and type when crossing edges (-K)
 args = []                   # anything else, passed on as is
+
+[beta]
+function_keys = false       # turn on the function keys below
+menu_key = "F13"            # command menu
+normal_key = "F14"          # normal mode
+hints_key = "F15"           # hint mode
+spare_keys = ["F16"]        # kept free: do nothing, and don't reach the pane
 ```
 
 With `borders = "boxed"`, the status bar is written into the panes' bottom

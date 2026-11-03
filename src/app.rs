@@ -11,11 +11,12 @@ use portable_pty::CommandBuilder;
 
 use crate::clipboard;
 use crate::clock;
-use crate::config::Config;
+use crate::config::{Config, FunctionAction};
 use crate::copy::{Action, Mode};
 use crate::hints;
 use crate::keys;
 use crate::layout::{Direction, Rect, Split};
+use crate::menu;
 use crate::pane::{Pane, PaneContext, PaneId};
 use crate::queries::TerminalColors;
 use crate::render;
@@ -40,6 +41,8 @@ pub struct App {
     /// Terminal size as (columns, rows).
     pub size: (u16, u16),
     pub prefix_pending: bool,
+    /// Whether the command menu is open; the prefix is pending meanwhile.
+    pub menu: bool,
     pub message: Option<String>,
     /// New name being typed for the active window.
     pub rename: Option<String>,
@@ -67,6 +70,7 @@ impl App {
             active: 0,
             size: crossterm::terminal::size()?,
             prefix_pending: false,
+            menu: false,
             message: None,
             rename: None,
             resize: None,
@@ -285,9 +289,18 @@ impl App {
             self.resize_key(key);
         } else if self.prefix_pending {
             self.prefix_pending = false;
-            if let Err(e) = self.command(key) {
+            let action = self.function_action(key);
+            if std::mem::take(&mut self.menu) && (key.code == KeyCode::Esc || action.is_some()) {
+                // Esc and the menu key just close the menu; the other
+                // function keys still work.
+                if let Some(action) = action.filter(|&a| a != FunctionAction::Menu) {
+                    self.function_key(action);
+                }
+            } else if let Err(e) = self.command(key) {
                 self.message = Some(e.to_string());
             }
+        } else if let Some(action) = self.function_action(key) {
+            self.function_key(action);
         } else if key.code == prefix.code && key.modifiers == prefix.modifiers {
             self.prefix_pending = true;
         } else if let Some(hints) = &mut self.active_window_mut().active_pane().hints {
@@ -335,6 +348,39 @@ impl App {
             }
             KeyCode::Char(c) if !ctrl => text.push(c),
             _ => {}
+        }
+    }
+
+    /// What `key` does if it is one of barbelo's function keys, and they
+    /// are turned on. Other keys go to the pane as usual.
+    fn function_action(&self, key: KeyEvent) -> Option<FunctionAction> {
+        let beta = &self.config.beta;
+        let n = menu::function_key(key).filter(|_| beta.function_keys)?;
+        beta.action(n)
+    }
+
+    fn function_key(&mut self, action: FunctionAction) {
+        let pane = self.windows[self.active].active_pane();
+        match action {
+            FunctionAction::Menu => {
+                self.prefix_pending = true;
+                self.menu = true;
+            }
+            // Normal mode, or back to insert mode.
+            FunctionAction::Normal if pane.copy.is_some() && pane.hints.is_none() => pane.copy = None,
+            FunctionAction::Normal => {
+                pane.hints = None;
+                pane.enter_copy_mode();
+            }
+            // Hint mode, or back out of it.
+            FunctionAction::Hints if pane.hints.is_some() => pane.hints = None,
+            FunctionAction::Hints => {
+                if !pane.enter_hint_mode(&self.config.hints.alphabet.0) {
+                    self.message = Some("nothing to copy".into());
+                }
+            }
+            // Kept free for a future job, rather than going to the pane.
+            FunctionAction::Spare => {}
         }
     }
 
