@@ -47,6 +47,10 @@ pub fn to_bytes(key: KeyEvent, application_cursor: bool) -> Vec<u8> {
             let code = [15, 17, 18, 19, 20, 21, 23, 24][(n - 5) as usize];
             tilde_key(&mut out, code, mods);
         }
+        // xterm, and so the panes' TERM, has F13 to F24 as Shift+F1 to F12.
+        KeyCode::F(n @ 13..=24) => {
+            return to_bytes(KeyEvent::new(KeyCode::F(n - 12), mods | KeyModifiers::SHIFT), application_cursor);
+        }
         _ => {}
     }
     out
@@ -121,5 +125,7 @@ mod tests {
         assert_eq!(to_bytes(key(KeyCode::Up, KeyModifiers::NONE), true), b"\x1bOA");
         assert_eq!(to_bytes(key(KeyCode::Left, KeyModifiers::CONTROL), false), b"\x1b[1;5D");
         assert_eq!(to_bytes(key(KeyCode::F(5), KeyModifiers::NONE), false), b"\x1b[15~");
+        assert_eq!(to_bytes(key(KeyCode::F(16), KeyModifiers::NONE), false), b"\x1b[1;2S");
+        assert_eq!(to_bytes(key(KeyCode::F(17), KeyModifiers::CONTROL), false), b"\x1b[15;6~");
     }
 }
