@@ -28,7 +28,7 @@ pub struct PaneContext {
 /// screen state built from its output.
 pub struct Pane {
     pub parser: Arc<Mutex<vt100::Parser<Responder>>>,
-    /// Set while the pane is in normal or visual mode.
+    /// Set while the pane is in browse or select mode.
     pub copy: Option<CopyMode>,
     /// Set while hints are shown; takes precedence over `copy`.
     pub hints: Option<HintMode>,

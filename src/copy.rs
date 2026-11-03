@@ -9,9 +9,9 @@ const SCROLL_TAU: f32 = 0.035;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {
-    Normal,
-    Visual,
-    VisualLine,
+    Browse,
+    Select,
+    SelectLine,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -89,7 +89,7 @@ impl CopyMode {
             lines,
             rows,
             cols,
-            mode: Mode::Normal,
+            mode: Mode::Browse,
             cursor,
             anchor: cursor,
             want_col: col,
@@ -151,9 +151,9 @@ impl CopyMode {
             (self.cursor, self.anchor)
         };
         match self.mode {
-            Mode::Normal => None,
-            Mode::Visual => Some((a, b)),
-            Mode::VisualLine => Some((
+            Mode::Browse => None,
+            Mode::Select => Some((a, b)),
+            Mode::SelectLine => Some((
                 Pos { line: a.line, col: 0 },
                 Pos {
                     line: b.line,
@@ -203,7 +203,7 @@ impl CopyMode {
         let explicit_count = self.count.take();
         let count = explicit_count.unwrap_or(1);
         let pending_g = std::mem::take(&mut self.pending_g);
-        let visual = self.mode != Mode::Normal;
+        let selecting = self.mode != Mode::Browse;
         let half_page = (self.rows as usize / 2).max(1);
         let page = (self.rows as usize).saturating_sub(2).max(1);
 
@@ -252,30 +252,30 @@ impl CopyMode {
             (KeyCode::Char('b'), true) | (KeyCode::PageUp, _) => self.scroll_page(count * page, false),
             (KeyCode::Char('e'), true) => self.scroll_view(count, true),
             (KeyCode::Char('y'), true) => self.scroll_view(count, false),
-            (KeyCode::Char('v'), false) => self.toggle_visual(Mode::Visual),
-            (KeyCode::Char('V'), false) => self.toggle_visual(Mode::VisualLine),
-            (KeyCode::Char('o'), false) if visual => {
+            (KeyCode::Char('v'), false) => self.toggle_select(Mode::Select),
+            (KeyCode::Char('V'), false) => self.toggle_select(Mode::SelectLine),
+            (KeyCode::Char('o'), false) if selecting => {
                 std::mem::swap(&mut self.anchor, &mut self.cursor);
                 self.want_col = self.cursor.col;
                 self.reveal_cursor();
             }
-            (KeyCode::Char('y'), false) | (KeyCode::Enter, _) if visual => {
+            (KeyCode::Char('y'), false) | (KeyCode::Enter, _) if selecting => {
                 let text = self.selected_text();
-                self.mode = Mode::Normal;
+                self.mode = Mode::Browse;
                 return Action::Yank(text);
             }
-            (KeyCode::Esc, _) if visual => self.mode = Mode::Normal,
+            (KeyCode::Esc, _) if selecting => self.mode = Mode::Browse,
             (KeyCode::Char('i' | 'a' | 'q'), false) => return Action::Exit,
             _ => {}
         }
         Action::None
     }
 
-    fn toggle_visual(&mut self, mode: Mode) {
+    fn toggle_select(&mut self, mode: Mode) {
         if self.mode == mode {
-            self.mode = Mode::Normal;
+            self.mode = Mode::Browse;
         } else {
-            if self.mode == Mode::Normal {
+            if self.mode == Mode::Browse {
                 self.anchor = self.cursor;
             }
             self.mode = mode;
@@ -521,7 +521,7 @@ mod tests {
         assert_eq!(press(&mut copy, "ggwve").as_deref(), None);
         assert_eq!(press(&mut copy, "y").as_deref(), Some("world"));
         assert_eq!(press(&mut copy, "ggVjy").as_deref(), Some("hello world\nfoo bar"));
-        assert_eq!(copy.mode, Mode::Normal);
+        assert_eq!(copy.mode, Mode::Browse);
     }
 
     #[test]

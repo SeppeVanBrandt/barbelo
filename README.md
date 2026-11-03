@@ -29,7 +29,7 @@ All commands start with the prefix key, `` ` `` (backtick) unless
 | `` ` w ``       | Pick a window by its letter (`Esc` cancels) |
 | `` ` x ``       | Close pane                              |
 | `` ` & ``       | Close window                            |
-| `` ` [ `` / `` ` Esc `` | Enter normal mode (scroll through output) |
+| `` ` [ `` / `` ` Esc `` | Enter browse mode (scroll through output) |
 | `` ` f ``       | Hint mode: copy text by typing its label |
 | `` ` ] ``       | Paste the last copied text              |
 | `` ` s ``       | Start the screensaver                   |
@@ -46,7 +46,7 @@ With `beta.function_keys = true`, by default:
 | Key   | Action |
 |-------|--------|
 | F13   | Open the command menu: a pop-up with every prefix command; press one of its keys to run it, `Esc` to close |
-| F14   | Normal mode, or back to insert mode |
+| F14   | Browse mode, or back to insert mode |
 | F15   | Pick a window: the window numbers in the status bar turn into letters; press one to go there |
 | F16   | Hint mode, or back out of it |
 
@@ -55,7 +55,7 @@ command. With `show_menu = false` the menu key works as a plain prefix: the
 prefix colors show it is waiting, and `H` brings up the menu when you need
 it.
 
-Any of F13 to F24 can take these jobs, with `menu_key`, `normal_key`,
+Any of F13 to F24 can take these jobs, with `menu_key`, `browse_key`,
 `windows_key` and `hints_key`; keys listed in `spare_keys` do nothing and
 don't reach the pane either. The prefix key keeps working as well.
 Shift+F1 to Shift+F12 count as F13 to F24, since many terminals send those
@@ -94,10 +94,10 @@ Each pane is in one of three modes. Outside insert mode, the mode's name
 replaces barbelo at the left of the status bar.
 
 - **INSERT**: the regular terminal; keys go to the program in the pane.
-- **NORMAL**: a frozen snapshot of the pane's history (1000 lines), navigated
+- **BROWSE**: a frozen snapshot of the pane's history (1000 lines), navigated
   with vi keys. The program keeps running; its new output appears once you go
   back to insert mode.
-- **VISUAL**: select text to copy. Copied text goes to the system clipboard
+- **SELECT**: select text to copy. Copied text goes to the system clipboard
   (`wl-copy`, `xclip` or `xsel`, falling back to OSC 52) and to barbelo's
   paste buffer.
 
@@ -105,7 +105,7 @@ replaces barbelo at the left of the status bar.
 
 Like [tmux-fingers](https://github.com/Morantron/tmux-fingers): every
 interesting string in view gets a short label. Type a label to copy that
-string. `Esc` cancels, `Backspace` undoes a typed letter. Works from normal mode too, on whatever part
+string. `Esc` cancels, `Backspace` undoes a typed letter. Works from browse mode too, on whatever part
 of the history is in view.
 
 Recognised: URLs, paths (with `:line:col`), files in `git status` output,
@@ -113,7 +113,7 @@ UUIDs, IPv4 addresses (with port), hex numbers, git SHAs and other hashes,
 and numbers of 4+ digits. Matches nearest the bottom get the shortest labels,
 and identical strings share one.
 
-### Normal mode
+### Browse mode
 
 | Keys                 | Action                                |
 |----------------------|---------------------------------------|
@@ -125,18 +125,18 @@ and identical strings share one.
 | `Ctrl-u` / `Ctrl-d`  | Scroll half a page up / down          |
 | `Ctrl-b` / `Ctrl-f`, PgUp / PgDn | Scroll a page up / down   |
 | `Ctrl-y` / `Ctrl-e`  | Scroll the view one line              |
-| `v` / `V`            | Visual mode (characters / lines)      |
+| `v` / `V`            | Select mode (characters / lines)      |
 | `i` `a` `q`          | Back to insert mode                   |
 
-### Visual mode
+### Select mode
 
-All normal-mode motions extend the selection, plus:
+All browse-mode motions extend the selection, plus:
 
 | Keys           | Action                                  |
 |----------------|-----------------------------------------|
-| `y` / Enter    | Copy the selection, back to normal mode |
+| `y` / Enter    | Copy the selection, back to browse mode |
 | `o`            | Jump to the other end of the selection  |
-| `Esc`          | Cancel, back to normal mode             |
+| `Esc`          | Cancel, back to browse mode             |
 
 ## Configuration
 
@@ -162,10 +162,10 @@ in_border = true            # with boxed borders: write the bar into the bottom 
 status_fg = "black"
 status_bg = "green"
 # insert_fg / insert_bg     # default to the status colors
-normal_fg = "white"
-normal_bg = "blue"
-visual_fg = "white"
-visual_bg = "magenta"
+browse_fg = "white"
+browse_bg = "blue"
+select_fg = "white"
+select_bg = "magenta"
 hints_fg = "black"
 hints_bg = "yellow"
 prefix_fg = "black"         # a prefix waiting for its command, without the menu
@@ -213,7 +213,7 @@ args = []                   # anything else, passed on as is
 function_keys = false       # turn on the function keys below
 show_menu = true            # false: the menu key is a plain prefix (menu key + H still shows the menu)
 menu_key = "F13"            # command menu
-normal_key = "F14"          # normal mode
+browse_key = "F14"          # browse mode
 windows_key = "F15"         # pick a window by its letter
 hints_key = "F16"           # hint mode
 spare_keys = []             # kept free: do nothing, and don't reach the pane
@@ -227,7 +227,7 @@ border instead of taking a line of its own:
 ```
 
 The title, or the mode's name, is then drawn in the mode's color
-(`active_border` in insert mode, `normal_bg`, `visual_bg` or `hints_bg`
+(`active_border` in insert mode, `browse_bg`, `select_bg` or `hints_bg`
 otherwise), and the active pane's frame takes that same color. The rest of
 the text uses the terminal's own colors unless `window_fg` and friends are
 set. Set `in_border = false` to keep a separate bar.

@@ -593,8 +593,8 @@ fn mode_color(app: &App) -> ConfigColor {
         _ if app.resize.is_some() => colors.resize_bg,
         _ if app.hinting() => colors.hints_bg,
         None => colors.active_border,
-        Some(Mode::Normal) => colors.normal_bg,
-        Some(Mode::Visual | Mode::VisualLine) => colors.visual_bg,
+        Some(Mode::Browse) => colors.browse_bg,
+        Some(Mode::Select | Mode::SelectLine) => colors.select_bg,
     }
 }
 
@@ -622,9 +622,9 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
             let (fg, bg) = colors.insert();
             (status.show_insert.then_some("INSERT"), fg, bg)
         }
-        Some(Mode::Normal) => (Some("NORMAL"), colors.normal_fg, colors.normal_bg),
-        Some(Mode::Visual) => (Some("VISUAL"), colors.visual_fg, colors.visual_bg),
-        Some(Mode::VisualLine) => (Some("V-LINE"), colors.visual_fg, colors.visual_bg),
+        Some(Mode::Browse) => (Some("BROWSE"), colors.browse_fg, colors.browse_bg),
+        Some(Mode::Select) => (Some("SELECT"), colors.select_fg, colors.select_bg),
+        Some(Mode::SelectLine) => (Some("S-LINE"), colors.select_fg, colors.select_bg),
     };
     // Wide enough for the title and every mode name, so nothing after it
     // shifts when the mode changes.

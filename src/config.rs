@@ -29,13 +29,14 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BetaConfig {
-    /// Function keys for the command menu, normal mode, picking windows and hint mode.
+    /// Function keys for the command menu, browse mode, picking windows and hint mode.
     pub function_keys: bool,
     /// Show the command menu when the menu key is pressed. Without it the
     /// key is a prefix like any other; the menu key and `H` still show it.
     pub show_menu: bool,
     pub menu_key: FunctionKey,
-    pub normal_key: FunctionKey,
+    #[serde(alias = "normal_key")]
+    pub browse_key: FunctionKey,
     /// Pick a window by its letter.
     pub windows_key: FunctionKey,
     pub hints_key: FunctionKey,
@@ -50,7 +51,7 @@ impl Default for BetaConfig {
             function_keys: false,
             show_menu: true,
             menu_key: FunctionKey(13),
-            normal_key: FunctionKey(14),
+            browse_key: FunctionKey(14),
             windows_key: FunctionKey(15),
             hints_key: FunctionKey(16),
             spare_keys: Vec::new(),
@@ -62,7 +63,7 @@ impl Default for BetaConfig {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FunctionAction {
     Menu,
-    Normal,
+    Browse,
     Windows,
     Hints,
     Spare,
@@ -73,7 +74,7 @@ impl BetaConfig {
     pub fn action(&self, n: u8) -> Option<FunctionAction> {
         let keys = [
             (self.menu_key, FunctionAction::Menu),
-            (self.normal_key, FunctionAction::Normal),
+            (self.browse_key, FunctionAction::Browse),
             (self.windows_key, FunctionAction::Windows),
             (self.hints_key, FunctionAction::Hints),
         ];
@@ -159,10 +160,14 @@ pub struct Colors {
     /// Insert mode colors; the status colors unless set.
     pub insert_fg: Option<ConfigColor>,
     pub insert_bg: Option<ConfigColor>,
-    pub normal_fg: ConfigColor,
-    pub normal_bg: ConfigColor,
-    pub visual_fg: ConfigColor,
-    pub visual_bg: ConfigColor,
+    #[serde(alias = "normal_fg")]
+    pub browse_fg: ConfigColor,
+    #[serde(alias = "normal_bg")]
+    pub browse_bg: ConfigColor,
+    #[serde(alias = "visual_fg")]
+    pub select_fg: ConfigColor,
+    #[serde(alias = "visual_bg")]
+    pub select_bg: ConfigColor,
     pub hints_fg: ConfigColor,
     pub hints_bg: ConfigColor,
     /// A prefix key waiting for its command, without the menu showing.
@@ -191,10 +196,10 @@ impl Default for Colors {
             status_bg: ConfigColor(Color::Green),
             insert_fg: None,
             insert_bg: None,
-            normal_fg: ConfigColor(Color::White),
-            normal_bg: ConfigColor(Color::Blue),
-            visual_fg: ConfigColor(Color::White),
-            visual_bg: ConfigColor(Color::Magenta),
+            browse_fg: ConfigColor(Color::White),
+            browse_bg: ConfigColor(Color::Blue),
+            select_fg: ConfigColor(Color::White),
+            select_bg: ConfigColor(Color::Magenta),
             hints_fg: ConfigColor(Color::Black),
             hints_bg: ConfigColor(Color::Yellow),
             prefix_fg: ConfigColor(Color::Black),
@@ -658,7 +663,7 @@ mod tests {
         let config = parse("").unwrap();
         assert_eq!(config.prefix, Prefix::default());
         assert!(!config.status.show_insert);
-        assert_eq!(config.colors.normal_bg, ConfigColor(Color::Blue));
+        assert_eq!(config.colors.browse_bg, ConfigColor(Color::Blue));
         assert_eq!(config.windows.name, "{process}");
     }
 
@@ -671,8 +676,8 @@ mod tests {
             show_insert = true
             [colors]
             status_bg = "#1e1e2e"
-            normal_bg = 208
-            visual_fg = "dark_grey"
+            browse_bg = 208
+            visual_fg = "dark_grey"  # the old name for select_fg still works
             [hints]
             alphabet = "jkl"
             [windows]
@@ -685,8 +690,8 @@ mod tests {
         assert!(config.status.show_insert);
         assert!(!config.status.color_by_mode);
         assert_eq!(config.colors.status_bg.0, Color::Rgb { r: 0x1e, g: 0x1e, b: 0x2e });
-        assert_eq!(config.colors.normal_bg.0, Color::AnsiValue(208));
-        assert_eq!(config.colors.visual_fg.0, Color::DarkGrey);
+        assert_eq!(config.colors.browse_bg.0, Color::AnsiValue(208));
+        assert_eq!(config.colors.select_fg.0, Color::DarkGrey);
         assert_eq!(config.colors.status_fg.0, Color::Black);
         assert_eq!(config.colors.insert().1, config.colors.status_bg);
         assert_eq!(config.hints.alphabet.0, b"jkl");
@@ -732,7 +737,7 @@ mod tests {
         assert_eq!(config.beta.action(16), Some(FunctionAction::Hints));
         assert_eq!(config.beta.action(17), None);
         let config = parse(
-            "[beta]\nmenu_key = \"F14\"\nnormal_key = \"F15\"\nwindows_key = \"F16\"\nhints_key = \"F17\"\nspare_keys = [\"F18\"]",
+            "[beta]\nmenu_key = \"F14\"\nbrowse_key = \"F15\"\nwindows_key = \"F16\"\nhints_key = \"F17\"\nspare_keys = [\"F18\"]",
         )
         .unwrap();
         assert_eq!(config.beta.action(13), None);

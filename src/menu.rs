@@ -38,7 +38,7 @@ pub const SECTIONS: &[Section] = &[
     Section {
         title: "Other",
         entries: &[
-            ("[", "normal mode"),
+            ("[", "browse mode"),
             ("f", "hint mode"),
             ("]", "paste"),
             ("s", "screensaver"),
@@ -51,8 +51,8 @@ pub const SECTIONS: &[Section] = &[
 /// Shown below the commands.
 pub fn footer(beta: &BetaConfig) -> String {
     format!(
-        "{} normal   {} windows   {} hints   Esc close",
-        beta.normal_key, beta.windows_key, beta.hints_key
+        "{} browse   {} windows   {} hints   Esc close",
+        beta.browse_key, beta.windows_key, beta.hints_key
     )
 }
 

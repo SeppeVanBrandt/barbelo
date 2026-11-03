@@ -389,9 +389,9 @@ impl App {
         let pane = self.windows[self.active].active_pane();
         match action {
             FunctionAction::Menu => self.open_menu(self.config.beta.show_menu),
-            // Normal mode, or back to insert mode.
-            FunctionAction::Normal if pane.copy.is_some() && pane.hints.is_none() => pane.copy = None,
-            FunctionAction::Normal => {
+            // Browse mode, or back to insert mode.
+            FunctionAction::Browse if pane.copy.is_some() && pane.hints.is_none() => pane.copy = None,
+            FunctionAction::Browse => {
                 pane.hints = None;
                 pane.enter_copy_mode();
             }
