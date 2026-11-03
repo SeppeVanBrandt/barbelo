@@ -50,6 +50,11 @@ With `beta.function_keys = true`, by default:
 | F15   | Pick a window: the window numbers in the status bar turn into letters; press one to go there |
 | F16   | Hint mode, or back out of it |
 
+After the menu key, `H` shows the menu as help and still waits for a
+command. With `show_menu = false` the menu key works as a plain prefix: the
+prefix colors show it is waiting, and `H` brings up the menu when you need
+it.
+
 Any of F13 to F24 can take these jobs, with `menu_key`, `normal_key`,
 `windows_key` and `hints_key`; keys listed in `spare_keys` do nothing and
 don't reach the pane either. The prefix key keeps working as well.
@@ -163,6 +168,8 @@ visual_fg = "white"
 visual_bg = "magenta"
 hints_fg = "black"
 hints_bg = "yellow"
+prefix_fg = "black"         # a prefix waiting for its command, without the menu
+prefix_bg = 208             # (orange); colors the active frame in boxed mode
 resize_fg = "black"         # resize mode: the status label and the keys
 resize_bg = "cyan"          # around the selected node, which is drawn in resize_bg
 active_border = "green"
@@ -204,6 +211,7 @@ args = []                   # anything else, passed on as is
 
 [beta]
 function_keys = false       # turn on the function keys below
+show_menu = true            # false: the menu key is a plain prefix (menu key + H still shows the menu)
 menu_key = "F13"            # command menu
 normal_key = "F14"          # normal mode
 windows_key = "F15"         # pick a window by its letter

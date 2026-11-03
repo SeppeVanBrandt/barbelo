@@ -42,6 +42,7 @@ pub const SECTIONS: &[Section] = &[
             ("f", "hint mode"),
             ("]", "paste"),
             ("s", "screensaver"),
+            ("H", "this help"),
             ("q", "quit"),
         ],
     },

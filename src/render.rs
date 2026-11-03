@@ -588,6 +588,7 @@ struct Segment {
 fn mode_color(app: &App) -> ConfigColor {
     let colors = &app.config.colors;
     match app.mode() {
+        _ if app.prefix_pending && !app.menu => colors.prefix_bg,
         _ if app.picking_window => colors.window_letter,
         _ if app.resize.is_some() => colors.resize_bg,
         _ if app.hinting() => colors.hints_bg,
@@ -613,6 +614,7 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     // The mode's name takes the place of the title, except in insert mode.
     let title = if status.greek { "[βαρβηλώ]" } else { "[barbelo]" };
     let (label, fg, bg) = match app.mode() {
+        _ if app.prefix_pending && !app.menu => (Some("PREFIX"), colors.prefix_fg, colors.prefix_bg),
         _ if app.picking_window => (Some("WINDOW"), ConfigColor(Color::Black), colors.window_letter),
         _ if app.resize.is_some() => (Some("RESIZE"), colors.resize_fg, colors.resize_bg),
         _ if app.hinting() => (Some("HINTS"), colors.hints_fg, colors.hints_bg),
@@ -707,9 +709,10 @@ fn draw_status(out: &mut impl Write, app: &App) -> io::Result<Option<(u16, u16)>
     let message = match (&app.message, app.prefix_pending, app.copy_position()) {
         _ if app.rename.is_some() => String::new(),
         (Some(msg), _, _) => format!(" {msg} "),
-        (None, true, _) => " PREFIX ".to_string(),
-        (None, false, Some((line, total))) => format!(" {line}/{total} "),
-        (None, false, None) => String::new(),
+        // Shown on the left instead when the title is.
+        (None, true, _) if !status.show_title => " PREFIX ".to_string(),
+        (None, _, Some((line, total))) => format!(" {line}/{total} "),
+        (None, _, None) => String::new(),
     };
     let clock = match status.clock {
         true => format!(" {} ", clock::now(&status.clock_format)),

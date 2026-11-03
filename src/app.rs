@@ -43,6 +43,9 @@ pub struct App {
     pub prefix_pending: bool,
     /// Whether the command menu is open; the prefix is pending meanwhile.
     pub menu: bool,
+    /// Whether the pending prefix came from the menu key, after which `H`
+    /// shows the menu as help.
+    menu_prefix: bool,
     pub message: Option<String>,
     /// New name being typed for the active window.
     pub rename: Option<String>,
@@ -73,6 +76,7 @@ impl App {
             size: crossterm::terminal::size()?,
             prefix_pending: false,
             menu: false,
+            menu_prefix: false,
             message: None,
             rename: None,
             resize: None,
@@ -294,12 +298,22 @@ impl App {
             self.pick_window_key(key);
         } else if self.prefix_pending {
             self.prefix_pending = false;
+            self.menu = false;
             let action = self.function_action(key);
-            if std::mem::take(&mut self.menu) && (key.code == KeyCode::Esc || action.is_some()) {
-                // Esc and the menu key just close the menu; the other
-                // function keys still work.
-                if let Some(action) = action.filter(|&a| a != FunctionAction::Menu) {
-                    self.function_key(action);
+            if std::mem::take(&mut self.menu_prefix) {
+                match key.code {
+                    // Help: show the menu, and keep waiting for a command.
+                    KeyCode::Char('H') => self.open_menu(true),
+                    // Esc and the menu key cancel; the other function keys
+                    // still do their job.
+                    KeyCode::Esc => {}
+                    _ if action == Some(FunctionAction::Menu) => {}
+                    _ if action.is_some() => self.function_key(action.expect("checked")),
+                    _ => {
+                        if let Err(e) = self.command(key) {
+                            self.message = Some(e.to_string());
+                        }
+                    }
                 }
             } else if let Err(e) = self.command(key) {
                 self.message = Some(e.to_string());
@@ -364,13 +378,17 @@ impl App {
         beta.action(n)
     }
 
+    /// Waits for a command after the menu key, showing the menu if `show`.
+    fn open_menu(&mut self, show: bool) {
+        self.prefix_pending = true;
+        self.menu_prefix = true;
+        self.menu = show;
+    }
+
     fn function_key(&mut self, action: FunctionAction) {
         let pane = self.windows[self.active].active_pane();
         match action {
-            FunctionAction::Menu => {
-                self.prefix_pending = true;
-                self.menu = true;
-            }
+            FunctionAction::Menu => self.open_menu(self.config.beta.show_menu),
             // Normal mode, or back to insert mode.
             FunctionAction::Normal if pane.copy.is_some() && pane.hints.is_none() => pane.copy = None,
             FunctionAction::Normal => {

@@ -31,6 +31,9 @@ pub struct Config {
 pub struct BetaConfig {
     /// Function keys for the command menu, normal mode, picking windows and hint mode.
     pub function_keys: bool,
+    /// Show the command menu when the menu key is pressed. Without it the
+    /// key is a prefix like any other; the menu key and `H` still show it.
+    pub show_menu: bool,
     pub menu_key: FunctionKey,
     pub normal_key: FunctionKey,
     /// Pick a window by its letter.
@@ -45,6 +48,7 @@ impl Default for BetaConfig {
     fn default() -> Self {
         Self {
             function_keys: false,
+            show_menu: true,
             menu_key: FunctionKey(13),
             normal_key: FunctionKey(14),
             windows_key: FunctionKey(15),
@@ -161,6 +165,9 @@ pub struct Colors {
     pub visual_bg: ConfigColor,
     pub hints_fg: ConfigColor,
     pub hints_bg: ConfigColor,
+    /// A prefix key waiting for its command, without the menu showing.
+    pub prefix_fg: ConfigColor,
+    pub prefix_bg: ConfigColor,
     pub resize_fg: ConfigColor,
     pub resize_bg: ConfigColor,
     pub active_border: ConfigColor,
@@ -190,6 +197,8 @@ impl Default for Colors {
             visual_bg: ConfigColor(Color::Magenta),
             hints_fg: ConfigColor(Color::Black),
             hints_bg: ConfigColor(Color::Yellow),
+            prefix_fg: ConfigColor(Color::Black),
+            prefix_bg: ConfigColor(Color::AnsiValue(208)),
             resize_fg: ConfigColor(Color::Black),
             resize_bg: ConfigColor(Color::Cyan),
             active_border: ConfigColor(Color::Green),
